@@ -3,7 +3,6 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 export default async function handler(req, res) {
-  // Только GET
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Метод не поддерживается' });
   }
@@ -20,27 +19,51 @@ export default async function handler(req, res) {
     const files = [];
     const dates = [];
 
-    $('a[href*=".zip"]').each((i, link) => {
-      const href = $(link).attr('href');
-      const match = href.match(/xbrl-csv-taxonomy-(\d{4}-\d{2}-\d{2})\.zip/i);
-      if (match) {
-        const date = match[1];
-        const url = new URL(href, 'https://www.cbr.ru').href;
-        files.push({
-          name: href.split('/').pop(),
-          url,
-          date
-        });
-        dates.push(date);
+    // Ищем все блоки с файлами
+    $('.document-regular').each((i, element) => {
+      const $el = $(element);
+      const $link = $el.find('a[href]');
+      const href = $link.attr('href');
+      const text = $link.text().trim();
+
+      if (!href || !href.includes('.zip')) return;
+
+      // Полная ссылка
+      const url = new URL(href, 'https://www.cbr.ru').href;
+
+      // Ищем дату в .document-regular_date
+      let date = null;
+      const $dateEl = $el.find('.document-regular_date');
+      if ($dateEl.length > 0) {
+        const dateText = $dateEl.text().trim(); // формат: 07.07.2025
+        const match = dateText.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+        if (match) {
+          date = `${match[3]}-${match[2]}-${match[1]}`; // 2025-07-07
+        }
       }
+
+      // Если даты нет — используем "unknown"
+      if (!date) date = 'unknown';
+
+      files.push({
+        name: text || href.split('/').pop(),
+        url,
+        date
+      });
+
+      if (date !== 'unknown') dates.push(date);
     });
 
-    if (dates.length === 0) {
+    if (files.length === 0) {
       return res.status(404).json({ error: 'Файлы не найдены' });
     }
 
-    const latestDate = new Date(Math.max(...dates.map(d => new Date(d))));
-    const latest_release = latestDate.toISOString().split('T')[0];
+    // Определяем последнюю дату
+    let latest_release = 'unknown';
+    if (dates.length > 0) {
+      const latestDate = new Date(Math.max(...dates.map(d => new Date(d))));
+      latest_release = latestDate.toISOString().split('T')[0];
+    }
 
     res.status(200).json({
       latest_release,
