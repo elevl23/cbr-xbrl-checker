@@ -1,0 +1,21 @@
+{
+  "name": "cbr-xbrl-checker",
+  "version": "1.0.0",
+  "description": "API to check CBR XBRL-CSV updates",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^14",
+    "react": "^18",
+    "react-dom": "^18",
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
