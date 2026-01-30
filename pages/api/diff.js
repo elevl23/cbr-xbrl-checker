@@ -5,7 +5,7 @@ import StreamZip from 'node-stream-zip';
 // Список текстовых файлов для сравнения
 const TEXT_EXTENSIONS = [
   '.xml', '.json', '.csv', '.ddl', '.txt',
-  '.sql', '.yml', '.yaml', '.xsd'  // ✅ .xsd добавлен
+  '.sql', '.yml', '.yaml', '.xsd'
 ];
 
 const isTextFile = (filename) => {
@@ -32,25 +32,43 @@ const diffLines = (oldLines, newLines) => {
 };
 
 // Извлечение всех текстовых файлов
-const extractAllTextFiles = async (buffer) => {
-  const zip = new StreamZip.async({ buffer });
-  const entries = await zip.entries();
-  const files = {};
+const extractAllTextFiles = async (buffer, label) => {
+  try {
+    console.log(`🔍 Извлечение из ${label}, размер buffer:`, buffer.length);
 
-  for (const [name, entry] of Object.entries(entries)) {
-    if (!entry.isDirectory && isTextFile(name)) {
-      try {
-        const data = await zip.entryData(name);
-        files[name] = data.toString('utf-8');
-      } catch (err) {
-        console.error('Ошибка при чтении файла:', name, err.message);
-        files[name] = null;
+    if (!Buffer.isBuffer(buffer)) {
+      console.error(`❌ buffer не Buffer, а:`, typeof buffer);
+      return null;
+    }
+
+    const zip = new StreamZip.async({ buffer });
+    const entries = await zip.entries();
+
+    console.log(`📄 Файлы в ${label}:`, Object.keys(entries));
+
+    const files = {};
+    for (const [name, entry] of Object.entries(entries)) {
+      if (!entry.isDirectory && isTextFile(name)) {
+        try {
+          console.log(`📄 Читаем:`, name);
+          const data = await zip.entryData(name);
+          files[name] = data.toString('utf-8');
+        } catch (err) {
+          console.error(`❌ Ошибка при чтении ${name}:`, err.message);
+          files[name] = null;
+        }
       }
     }
-  }
 
-  await zip.close();
-  return files;
+    await zip.close();
+    return files;
+  } catch (err) {
+    console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
+    try {
+      await zip?.close();
+    } catch (closeErr) {}
+    return null;
+  }
 };
 
 export default async function handler(req, res) {
@@ -79,7 +97,15 @@ export default async function handler(req, res) {
         timeout: 30000,
         maxContentLength: 10 * 1024 * 1024
       });
-      console.log('✅ Старый ZIP скачан:', res.data.length, 'байт');
+
+      console.log('✅ Старый ZIP скачан, размер:', res.data?.length);
+      console.log('Тип res.data:', typeof res.data);
+      console.log('res.data instanceof ArrayBuffer:', res.data instanceof ArrayBuffer);
+
+      if (!res.data) {
+        throw new Error('res.data пустой — нет данных');
+      }
+
       oldBuffer = Buffer.from(res.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
@@ -102,7 +128,15 @@ export default async function handler(req, res) {
         timeout: 30000,
         maxContentLength: 10 * 1024 * 1024
       });
-      console.log('✅ Новый ZIP скачан:', res.data.length, 'байт');
+
+      console.log('✅ Новый ZIP скачан, размер:', res.data?.length);
+      console.log('Тип res.data:', typeof res.data);
+      console.log('res.data instanceof ArrayBuffer:', res.data instanceof ArrayBuffer);
+
+      if (!res.data) {
+        throw new Error('res.data пустой — нет данных');
+      }
+
       newBuffer = Buffer.from(res.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
@@ -114,24 +148,19 @@ export default async function handler(req, res) {
     }
 
     // === Извлечение файлов ===
-    let oldFiles, newFiles;
-    try {
-      oldFiles = await extractAllTextFiles(oldBuffer);
-      console.log('📄 Извлечено из старого архива:', Object.keys(oldFiles));
-    } catch (err) {
-      console.error('❌ Ошибка при извлечении старого архива:', err.message);
+    let oldFiles = await extractAllTextFiles(oldBuffer, 'старого архива');
+    if (!oldFiles) {
       return res.status(500).json({
-        error: 'Не удалось извлечь старый архив'
+        error: 'Не удалось извлечь старый архив',
+        details: 'Ошибка при распаковке или повреждённый ZIP'
       });
     }
 
-    try {
-      newFiles = await extractAllTextFiles(newBuffer);
-      console.log('📄 Извлечено из нового архива:', Object.keys(newFiles));
-    } catch (err) {
-      console.error('❌ Ошибка при извлечении нового архива:', err.message);
+    let newFiles = await extractAllTextFiles(newBuffer, 'нового архива');
+    if (!newFiles) {
       return res.status(500).json({
-        error: 'Не удалось извлечь новый архив'
+        error: 'Не удалось извлечь новый архив',
+        details: 'Ошибка при распаковке или повреждённый ZIP'
       });
     }
 
