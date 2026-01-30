@@ -89,7 +89,7 @@ export default async function handler(req, res) {
     let oldBuffer;
     try {
       const res = await axios.get(old_url, {
-        responseType: 'arraybuffer', // ← оставляем
+        responseType: 'arraybuffer',
         headers: {
           'User-Agent': 'CBR-Checker/1.0',
           'Accept': 'application/zip'
@@ -99,17 +99,17 @@ export default async function handler(req, res) {
       });
 
       console.log('✅ Старый ZIP скачан, тип:', typeof res.data);
-      console.log('res.data instanceof ArrayBuffer:', res.data instanceof ArrayBuffer);
+      console.log('res.data имеет byteLength:', 'byteLength' in res.data);
 
-      // Если res.data — строка, но содержит бинарные данные
-      if (typeof res.data === 'string') {
+      // ✅ Гибкая проверка: если есть byteLength → считаем ArrayBuffer
+      if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
+        console.log('✅ res.data — ArrayBuffer (по структуре)');
+        oldBuffer = Buffer.from(res.data);
+      } else if (typeof res.data === 'string') {
         console.log('⚠️ res.data — строка, преобразуем как binary');
         oldBuffer = Buffer.from(res.data, 'binary');
-      } else if (res.data instanceof ArrayBuffer) {
-        console.log('✅ res.data — ArrayBuffer, преобразуем');
-        oldBuffer = Buffer.from(res.data);
       } else {
-        throw new Error('Неизвестный тип res.data');
+        throw new Error('Неизвестный формат данных: не ArrayBuffer и не строка');
       }
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
@@ -134,16 +134,16 @@ export default async function handler(req, res) {
       });
 
       console.log('✅ Новый ZIP скачан, тип:', typeof res.data);
-      console.log('res.data instanceof ArrayBuffer:', res.data instanceof ArrayBuffer);
+      console.log('res.data имеет byteLength:', 'byteLength' in res.data);
 
-      if (typeof res.data === 'string') {
+      if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
+        console.log('✅ res.data — ArrayBuffer (по структуре)');
+        newBuffer = Buffer.from(res.data);
+      } else if (typeof res.data === 'string') {
         console.log('⚠️ res.data — строка, преобразуем как binary');
         newBuffer = Buffer.from(res.data, 'binary');
-      } else if (res.data instanceof ArrayBuffer) {
-        console.log('✅ res.data — ArrayBuffer, преобразуем');
-        newBuffer = Buffer.from(res.data);
       } else {
-        throw new Error('Неизвестный тип res.data');
+        throw new Error('Неизвестный формат данных: не ArrayBuffer и не строка');
       }
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
