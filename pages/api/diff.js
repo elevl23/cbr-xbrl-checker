@@ -35,7 +35,11 @@ export default async function handler(req, res) {
         await zip.close();
         return data.toString('utf-8');
       } catch (err) {
-        await zip.close();
+        try {
+          await zip.close();
+        } catch (closeErr) {
+          // ignore
+        }
         return null;
       }
     };
@@ -60,4 +64,58 @@ export default async function handler(req, res) {
     }
 
     if (newContent === null) {
-    
+      return res.status(200).json({
+        file: file_name,
+        change: 'removed',
+        content: oldContent,
+        summary: 'Файл удалён'
+      });
+    }
+
+    if (oldContent === newContent) {
+      return res.status(200).json({
+        file: file_name,
+        change: 'no_change',
+        summary: 'Файл не изменился'
+      });
+    }
+
+    // Построчное сравнение
+    const diff = (oldLines, newLines) => {
+      const result = [];
+      let i = 0, j = 0;
+      while (i < oldLines.length || j < newLines.length) {
+        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+          result.push({ type: 'same', value: oldLines[i] });
+          i++; j++;
+        } else if (j < newLines.length) {
+          result.push({ type: 'added', value: newLines[j] });
+          j++;
+        } else {
+          result.push({ type: 'removed', value: oldLines[i] });
+          i++;
+        }
+      }
+      return result;
+    };
+
+    const oldLines = oldContent.split('\n');
+    const newLines = newContent.split('\n');
+    const changes = diff(oldLines, newLines);
+
+    res.status(200).json({
+      file: file_name,
+      change: 'modified',
+      diff: changes,
+      summary: 'Файл изменён',
+      old_version: old_url,
+      new_version: new_url
+    });
+  } catch (error) {
+    console.error('Ошибка:', error.message);
+    res.status(500).json({
+      error: 'Не удалось сравнить архивы',
+      message: error.message
+    });
+  }
+}
