@@ -41,6 +41,7 @@ const extractAllTextFiles = async (buffer, label) => {
       return null;
     }
 
+    // ✅ Убедимся, что buffer — это Buffer
     const zip = new StreamZip.async({ buffer });
     const entries = await zip.entries();
 
@@ -101,9 +102,9 @@ export default async function handler(req, res) {
       console.log('✅ Старый ZIP скачан, тип:', typeof res.data);
       console.log('res.data имеет byteLength:', 'byteLength' in res.data);
 
-      // ✅ Гибкая проверка: если есть byteLength → считаем ArrayBuffer
       if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
         console.log('✅ res.data — ArrayBuffer (по структуре)');
+        // ✅ Явно создаём Buffer из ArrayBuffer
         oldBuffer = Buffer.from(res.data);
       } else if (typeof res.data === 'string') {
         console.log('⚠️ res.data — строка, преобразуем как binary');
