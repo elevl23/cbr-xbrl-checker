@@ -2,37 +2,85 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 import StreamZip from 'node-stream-zip';
 
+// Список текстовых файлов для сравнения
+const TEXT_EXTENSIONS = [
+  '.xml', '.json', '.csv', '.ddl', '.txt',
+  '.sql', '.yml', '.yaml', '.xsd'  // ✅ .xsd добавлен
+];
+
+const isTextFile = (filename) => {
+  return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
+};
+
+// Построчное сравнение
+const diffLines = (oldLines, newLines) => {
+  const result = [];
+  let i = 0, j = 0;
+  while (i < oldLines.length || j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+      result.push({ type: 'same', value: oldLines[i] });
+      i++; j++;
+    } else if (j < newLines.length) {
+      result.push({ type: 'added', value: newLines[j] });
+      j++;
+    } else {
+      result.push({ type: 'removed', value: oldLines[i] });
+      i++;
+    }
+  }
+  return result;
+};
+
+// Извлечение всех текстовых файлов
+const extractAllTextFiles = async (buffer) => {
+  const zip = new StreamZip.async({ buffer });
+  const entries = await zip.entries();
+  const files = {};
+
+  for (const [name, entry] of Object.entries(entries)) {
+    if (!entry.isDirectory && isTextFile(name)) {
+      try {
+        const data = await zip.entryData(name);
+        files[name] = data.toString('utf-8');
+      } catch (err) {
+        console.error('Ошибка при чтении файла:', name, err.message);
+        files[name] = null;
+      }
+    }
+  }
+
+  await zip.close();
+  return files;
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Метод не поддерживается' });
   }
 
   try {
-    const { old_url, new_url, file_name } = req.body;
+    const { old_url, new_url } = req.body;
 
-    if (!old_url || !new_url || !file_name) {
-      return res.status(400).json({ error: 'Не хватает параметров' });
+    if (!old_url || !new_url) {
+      return res.status(400).json({ error: 'Не хватает old_url или new_url' });
     }
 
-    console.log('📥 Запрос на сравнение:', { old_url, new_url, file_name });
+    console.log('📥 Запрос на сравнение:', { old_url, new_url });
 
     // === Скачивание старого ZIP ===
     let oldBuffer;
     try {
-      const oldRes = await axios.get(old_url, {
+      const res = await axios.get(old_url, {
         responseType: 'arraybuffer',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-          'Accept': 'application/zip',
-          'Referer': 'https://www.cbr.ru/',
-          'Origin': 'https://www.cbr.ru'
+          'User-Agent': 'CBR-Checker/1.0',
+          'Accept': 'application/zip'
         },
-        timeout: 30000, // 30 секунд
-        maxContentLength: 10 * 1024 * 1024 // 10 МБ
+        timeout: 30000,
+        maxContentLength: 10 * 1024 * 1024
       });
-
-      console.log('✅ Старый ZIP скачан:', oldRes.data.length, 'байт');
-      oldBuffer = Buffer.from(oldRes.data);
+      console.log('✅ Старый ZIP скачан:', res.data.length, 'байт');
+      oldBuffer = Buffer.from(res.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
       return res.status(500).json({
@@ -45,20 +93,17 @@ export default async function handler(req, res) {
     // === Скачивание нового ZIP ===
     let newBuffer;
     try {
-      const newRes = await axios.get(new_url, {
+      const res = await axios.get(new_url, {
         responseType: 'arraybuffer',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-          'Accept': 'application/zip',
-          'Referer': 'https://www.cbr.ru/',
-          'Origin': 'https://www.cbr.ru'
+          'User-Agent': 'CBR-Checker/1.0',
+          'Accept': 'application/zip'
         },
-        timeout: 30000, // 30 секунд
+        timeout: 30000,
         maxContentLength: 10 * 1024 * 1024
       });
-
-      console.log('✅ Новый ZIP скачан:', newRes.data.length, 'байт');
-      newBuffer = Buffer.from(newRes.data);
+      console.log('✅ Новый ZIP скачан:', res.data.length, 'байт');
+      newBuffer = Buffer.from(res.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
       return res.status(500).json({
@@ -68,88 +113,73 @@ export default async function handler(req, res) {
       });
     }
 
-    // === Извлечение файла ===
-    const extractEntry = async (buffer, fileName) => {
-      try {
-        const zip = new StreamZip.async({ buffer });
-        const entries = await zip.entries();
-        if (!entries[fileName]) {
-          await zip.close();
-          return null;
-        }
-        const data = await zip.entryData(fileName);
-        await zip.close();
-        return data.toString('utf-8');
-      } catch (err) {
-        console.error('❌ Ошибка при извлечении:', err.message);
-        try {
-          await zip.close();
-        } catch (closeErr) {}
-        return null;
+    // === Извлечение файлов ===
+    let oldFiles, newFiles;
+    try {
+      oldFiles = await extractAllTextFiles(oldBuffer);
+      console.log('📄 Извлечено из старого архива:', Object.keys(oldFiles));
+    } catch (err) {
+      console.error('❌ Ошибка при извлечении старого архива:', err.message);
+      return res.status(500).json({
+        error: 'Не удалось извлечь старый архив'
+      });
+    }
+
+    try {
+      newFiles = await extractAllTextFiles(newBuffer);
+      console.log('📄 Извлечено из нового архива:', Object.keys(newFiles));
+    } catch (err) {
+      console.error('❌ Ошибка при извлечении нового архива:', err.message);
+      return res.status(500).json({
+        error: 'Не удалось извлечь новый архив'
+      });
+    }
+
+    // === Сравнение ===
+    const changes = [];
+
+    // Удалённые файлы
+    for (const name of Object.keys(oldFiles)) {
+      if (!newFiles[name]) {
+        changes.push({
+          type: 'deleted',
+          file: name,
+          summary: 'Файл удалён'
+        });
       }
-    };
-
-    const oldContent = await extractEntry(oldBuffer, file_name);
-    const newContent = await extractEntry(newBuffer, file_name);
-
-    if (oldContent === null && newContent === null) {
-      return res.status(404).json({ error: 'Файл не найден ни в одном архиве' });
     }
 
-    if (oldContent === null) {
-      return res.status(200).json({
-        file: file_name,
-        change: 'added',
-        content: newContent,
-        summary: 'Файл добавлен'
-      });
-    }
-
-    if (newContent === null) {
-      return res.status(200).json({
-        file: file_name,
-        change: 'removed',
-        content: oldContent,
-        summary: 'Файл удалён'
-      });
-    }
-
-    if (oldContent === newContent) {
-      return res.status(200).json({
-        file: file_name,
-        change: 'no_change',
-        summary: 'Файл не изменился'
-      });
-    }
-
-    // === Построчное сравнение ===
-    const diff = (oldLines, newLines) => {
-      const result = [];
-      let i = 0, j = 0;
-      while (i < oldLines.length || j < newLines.length) {
-        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-          result.push({ type: 'same', value: oldLines[i] });
-          i++; j++;
-        } else if (j < newLines.length) {
-          result.push({ type: 'added', value: newLines[j] });
-          j++;
-        } else {
-          result.push({ type: 'removed', value: oldLines[i] });
-          i++;
-        }
+    // Новые файлы
+    for (const name of Object.keys(newFiles)) {
+      if (!oldFiles[name]) {
+        changes.push({
+          type: 'added',
+          file: name,
+          summary: 'Файл добавлен'
+        });
       }
-      return result;
-    };
+    }
 
-    const oldLines = oldContent.split('\n');
-    const newLines = newContent.split('\n');
-    const changes = diff(oldLines, newLines);
+    // Изменённые файлы
+    for (const name of Object.keys(newFiles)) {
+      if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
+        const oldLines = oldFiles[name].split('\n');
+        const newLines = newFiles[name].split('\n');
+        const diff = diffLines(oldLines, newLines);
 
+        changes.push({
+          type: 'modified',
+          file: name,
+          diff,
+          summary: 'Файл изменён'
+        });
+      }
+    }
+
+    // === Ответ ===
     res.status(200).json({
-      file: file_name,
-      change: 'modified',
-      diff: changes,
-      summary: 'Файл изменён',
+      changes,
+      summary: `Найдено изменений: ${changes.length}`,
       old_version: old_url,
       new_version: new_url
     });
