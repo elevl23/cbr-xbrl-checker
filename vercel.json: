@@ -1,7 +1,0 @@
-{
-  "build": {
-    "env": {
-      "VERCEL_YARN_VERSION": "1.22.22"
-    }
-  }
-}
