@@ -8,21 +8,36 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Логируем тело запроса
+    console.log('req.body:', req.body);
+
     const { old_url, new_url, file_name } = req.body;
 
+    // Проверяем параметры
     if (!old_url || !new_url || !file_name) {
       return res.status(400).json({
-        error: 'Не хватает параметров: old_url, new_url, file_name'
+        error: 'Не хватает параметров',
+        received: { old_url, new_url, file_name }
       });
     }
 
+    console.log('Скачиваем:', old_url, 'и', new_url);
+
     // Скачиваем ZIP
     const [oldRes, newRes] = await Promise.all([
-      axios.get(old_url, { responseType: 'arraybuffer' }),
-      axios.get(new_url, { responseType: 'arraybuffer' })
+      axios.get(old_url, { 
+        responseType: 'arraybuffer',
+        headers: { 'User-Agent': 'CBR-Checker/1.0' }
+      }),
+      axios.get(new_url, { 
+        responseType: 'arraybuffer',
+        headers: { 'User-Agent': 'CBR-Checker/1.0' }
+      })
     ]);
 
-    // Извлечение файла из ZIP
+    console.log('ZIP скачаны, размер:', oldRes.data.length, newRes.data.length);
+
+    // Извлечение файла
     const extractEntry = async (buffer, fileName) => {
       const zip = new StreamZip.async({ buffer });
       try {
@@ -35,11 +50,10 @@ export default async function handler(req, res) {
         await zip.close();
         return data.toString('utf-8');
       } catch (err) {
+        console.error('Ошибка при извлечении:', err.message);
         try {
           await zip.close();
-        } catch (closeErr) {
-          // ignore
-        }
+        } catch (closeErr) {}
         return null;
       }
     };
@@ -47,7 +61,6 @@ export default async function handler(req, res) {
     const oldContent = await extractEntry(oldRes.data, file_name);
     const newContent = await extractEntry(newRes.data, file_name);
 
-    // Логика сравнения
     if (oldContent === null && newContent === null) {
       return res.status(404).json({
         error: 'Файл не найден ни в одном архиве'
@@ -112,10 +125,11 @@ export default async function handler(req, res) {
       new_version: new_url
     });
   } catch (error) {
-    console.error('Ошибка:', error.message);
+    console.error('Критическая ошибка:', error.message);
     res.status(500).json({
       error: 'Не удалось сравнить архивы',
-      message: error.message
+      message: error.message,
+      stack: error.stack
     });
   }
 }
