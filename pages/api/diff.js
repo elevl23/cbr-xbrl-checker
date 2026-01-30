@@ -14,7 +14,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Не хватает параметров' });
     }
 
-    console.log('📥 Получен запрос:', { old_url, new_url, file_name });
+    console.log('📥 Запрос на сравнение:', { old_url, new_url, file_name });
 
     // === Скачивание старого ZIP ===
     let oldBuffer;
@@ -28,20 +28,18 @@ export default async function handler(req, res) {
           'Origin': 'https://www.cbr.ru'
         },
         timeout: 15000,
-        maxContentLength: 50 * 1024 * 1024 // 50 МБ
+        maxContentLength: 50 * 1024 * 1024
       });
 
       console.log('✅ Старый ZIP скачан:', oldRes.data.length, 'байт');
       if (!oldRes.data || oldRes.data.length === 0) {
         throw new Error('Пустой ответ');
       }
-      oldBuffer = oldRes.data;
+
+      // 🔧 Преобразуем в Buffer
+      oldBuffer = Buffer.from(oldRes.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
-      if (err.response) {
-        console.error('Status:', err.response.status);
-        console.error('Data:', err.response.data.toString().slice(0, 200));
-      }
       return res.status(500).json({
         error: 'Не удалось скачать старый ZIP',
         url: old_url,
@@ -68,13 +66,11 @@ export default async function handler(req, res) {
       if (!newRes.data || newRes.data.length === 0) {
         throw new Error('Пустой ответ');
       }
-      newBuffer = newRes.data;
+
+      // 🔧 Преобразуем в Buffer
+      newBuffer = Buffer.from(newRes.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
-      if (err.response) {
-        console.error('Status:', err.response.status);
-        console.error('Data:', err.response.data.toString().slice(0, 200));
-      }
       return res.status(500).json({
         error: 'Не удалось скачать новый ZIP',
         url: new_url,
@@ -84,8 +80,8 @@ export default async function handler(req, res) {
 
     // === Извлечение файла ===
     const extractEntry = async (buffer, fileName) => {
-      const zip = new StreamZip.async({ buffer });
       try {
+        const zip = new StreamZip.async({ buffer });
         const entries = await zip.entries();
         if (!entries[fileName]) {
           await zip.close();
