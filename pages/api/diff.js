@@ -17,16 +17,49 @@ export default async function handler(req, res) {
       });
     }
 
-    console.log('Скачиваем:', old_url, 'и', new_url);
+    console.log('Запрос на сравнение:', { old_url, new_url, file_name });
 
-    // Скачиваем ZIP с проверкой
-    let oldRes, newRes;
+    // Функция для безопасного скачивания
+    const downloadZip = async (url) => {
+      try {
+        const response = await axios.get(url, {
+          method: 'GET',
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            'Accept': 'application/zip',
+            'Referer': 'https://www.cbr.ru/',
+            'Origin': 'https://www.cbr.ru'
+          },
+          timeout: 10000, // 10 сек
+          maxContentLength: 50 * 1024 * 1024, // 50 МБ
+          validateStatus: (status) => status === 200
+        });
+
+        if (!response.data || response.data.length === 0) {
+          throw new Error('Пустой ответ');
+        }
+
+        console.log('Успешно скачан:', url, 'размер:', response.data.length);
+        return response.data;
+      } catch (err) {
+        console.error('Ошибка при скачивании:', url);
+        if (err.response) {
+          console.error('Status:', err.response.status);
+          console.error('Data:', err.response.data.toString().slice(0, 200));
+        } else if (err.request) {
+          console.error('No response received');
+        } else {
+          console.error('Error:', err.message);
+        }
+        throw err;
+      }
+    };
+
+    let oldBuffer, newBuffer;
 
     try {
-      oldRes = await axios.get(old_url, {
-        responseType: 'arraybuffer',
-        headers: { 'User-Agent': 'CBR-Checker/1.0' }
-      });
+      oldBuffer = await downloadZip(old_url);
     } catch (err) {
       return res.status(500).json({
         error: 'Не удалось скачать старый ZIP',
@@ -36,10 +69,7 @@ export default async function handler(req, res) {
     }
 
     try {
-      newRes = await axios.get(new_url, {
-        responseType: 'arraybuffer',
-        headers: { 'User-Agent': 'CBR-Checker/1.0' }
-      });
+      newBuffer = await downloadZip(new_url);
     } catch (err) {
       return res.status(500).json({
         error: 'Не удалось скачать новый ZIP',
@@ -48,16 +78,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // Проверяем, что данные пришли
-    if (!oldRes.data || !newRes.data) {
+    if (!oldBuffer || !newBuffer) {
       return res.status(500).json({
-        error: 'Скачанный ZIP пустой',
-        old_data_size: oldRes.data?.length,
-        new_data_size: newRes.data?.length
+        error: 'Один из архивов пуст'
       });
     }
-
-    console.log('ZIP скачаны, размер:', oldRes.data.length, newRes.data.length);
 
     // Извлечение файла
     const extractEntry = async (buffer, fileName) => {
@@ -80,8 +105,8 @@ export default async function handler(req, res) {
       }
     };
 
-    const oldContent = await extractEntry(oldRes.data, file_name);
-    const newContent = await extractEntry(newRes.data, file_name);
+    const oldContent = await extractEntry(oldBuffer, file_name);
+    const newContent = await extractEntry(newBuffer, file_name);
 
     if (oldContent === null && newContent === null) {
       return res.status(404).json({
