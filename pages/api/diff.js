@@ -8,12 +8,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Логируем тело запроса
-    console.log('req.body:', req.body);
-
     const { old_url, new_url, file_name } = req.body;
 
-    // Проверяем параметры
     if (!old_url || !new_url || !file_name) {
       return res.status(400).json({
         error: 'Не хватает параметров',
@@ -23,17 +19,43 @@ export default async function handler(req, res) {
 
     console.log('Скачиваем:', old_url, 'и', new_url);
 
-    // Скачиваем ZIP
-    const [oldRes, newRes] = await Promise.all([
-      axios.get(old_url, { 
+    // Скачиваем ZIP с проверкой
+    let oldRes, newRes;
+
+    try {
+      oldRes = await axios.get(old_url, {
         responseType: 'arraybuffer',
         headers: { 'User-Agent': 'CBR-Checker/1.0' }
-      }),
-      axios.get(new_url, { 
+      });
+    } catch (err) {
+      return res.status(500).json({
+        error: 'Не удалось скачать старый ZIP',
+        url: old_url,
+        message: err.message
+      });
+    }
+
+    try {
+      newRes = await axios.get(new_url, {
         responseType: 'arraybuffer',
         headers: { 'User-Agent': 'CBR-Checker/1.0' }
-      })
-    ]);
+      });
+    } catch (err) {
+      return res.status(500).json({
+        error: 'Не удалось скачать новый ZIP',
+        url: new_url,
+        message: err.message
+      });
+    }
+
+    // Проверяем, что данные пришли
+    if (!oldRes.data || !newRes.data) {
+      return res.status(500).json({
+        error: 'Скачанный ZIP пустой',
+        old_data_size: oldRes.data?.length,
+        new_data_size: newRes.data?.length
+      });
+    }
 
     console.log('ZIP скачаны, размер:', oldRes.data.length, newRes.data.length);
 
