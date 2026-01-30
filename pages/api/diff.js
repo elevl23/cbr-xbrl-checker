@@ -89,7 +89,7 @@ export default async function handler(req, res) {
     let oldBuffer;
     try {
       const res = await axios.get(old_url, {
-        responseType: 'arraybuffer',
+        responseType: 'blob', // 🔁 Используем blob
         headers: {
           'User-Agent': 'CBR-Checker/1.0',
           'Accept': 'application/zip'
@@ -98,15 +98,15 @@ export default async function handler(req, res) {
         maxContentLength: 10 * 1024 * 1024
       });
 
-      console.log('✅ Старый ZIP скачан, размер:', res.data?.length);
-      console.log('Тип res.data:', typeof res.data);
-      console.log('res.data instanceof ArrayBuffer:', res.data instanceof ArrayBuffer);
+      console.log('✅ Старый ZIP скачан, тип:', typeof res.data);
+      console.log('res.data:', res.data);
 
-      if (!res.data) {
-        throw new Error('res.data пустой — нет данных');
-      }
+      // 🔧 Явно получаем ArrayBuffer
+      const arrayBuffer = await res.data.arrayBuffer();
+      console.log('✅ arrayBuffer получено, размер:', arrayBuffer.byteLength);
 
-      oldBuffer = Buffer.from(res.data);
+      // ✅ Преобразуем в Buffer
+      oldBuffer = Buffer.from(arrayBuffer);
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
       return res.status(500).json({
@@ -120,7 +120,7 @@ export default async function handler(req, res) {
     let newBuffer;
     try {
       const res = await axios.get(new_url, {
-        responseType: 'arraybuffer',
+        responseType: 'blob', // 🔁 blob
         headers: {
           'User-Agent': 'CBR-Checker/1.0',
           'Accept': 'application/zip'
@@ -129,15 +129,13 @@ export default async function handler(req, res) {
         maxContentLength: 10 * 1024 * 1024
       });
 
-      console.log('✅ Новый ZIP скачан, размер:', res.data?.length);
-      console.log('Тип res.data:', typeof res.data);
-      console.log('res.data instanceof ArrayBuffer:', res.data instanceof ArrayBuffer);
+      console.log('✅ Новый ZIP скачан, тип:', typeof res.data);
+      console.log('res.data:', res.data);
 
-      if (!res.data) {
-        throw new Error('res.data пустой — нет данных');
-      }
+      const arrayBuffer = await res.data.arrayBuffer();
+      console.log('✅ arrayBuffer получено, размер:', arrayBuffer.byteLength);
 
-      newBuffer = Buffer.from(res.data);
+      newBuffer = Buffer.from(arrayBuffer);
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
       return res.status(500).json({
