@@ -27,16 +27,11 @@ export default async function handler(req, res) {
           'Referer': 'https://www.cbr.ru/',
           'Origin': 'https://www.cbr.ru'
         },
-        timeout: 15000,
-        maxContentLength: 50 * 1024 * 1024
+        timeout: 30000, // 30 секунд
+        maxContentLength: 10 * 1024 * 1024 // 10 МБ
       });
 
       console.log('✅ Старый ZIP скачан:', oldRes.data.length, 'байт');
-      if (!oldRes.data || oldRes.data.length === 0) {
-        throw new Error('Пустой ответ');
-      }
-
-      // 🔧 Преобразуем в Buffer
       oldBuffer = Buffer.from(oldRes.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
@@ -58,16 +53,11 @@ export default async function handler(req, res) {
           'Referer': 'https://www.cbr.ru/',
           'Origin': 'https://www.cbr.ru'
         },
-        timeout: 15000,
-        maxContentLength: 50 * 1024 * 1024
+        timeout: 30000, // 30 секунд
+        maxContentLength: 10 * 1024 * 1024
       });
 
       console.log('✅ Новый ZIP скачан:', newRes.data.length, 'байт');
-      if (!newRes.data || newRes.data.length === 0) {
-        throw new Error('Пустой ответ');
-      }
-
-      // 🔧 Преобразуем в Buffer
       newBuffer = Buffer.from(newRes.data);
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
