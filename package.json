@@ -14,7 +14,7 @@
     "react-dom": "^18",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
-    "node-stream-zip": "^2.2.3"
+    "node-stream-zip": "^1.15.0"
   },
   "engines": {
     "node": ">=18"
