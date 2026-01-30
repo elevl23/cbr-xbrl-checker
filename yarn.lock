@@ -1,0 +1,34 @@
+# yarn.lock
+# Это автоматически сгенерированный файл
+
+node-stream-zip@^2.2.3:
+  version "2.2.3"
+  resolved "https://registry.yarnpkg.com/node-stream-zip/-/node-stream-zip-2.2.3.tgz"
+  integrity sha512-12g5+H/t3Kc5At3brO0UQ81jKvXuX6gcjjeoWYnZkBzD1vYmLkDUg8axRfVh5HSQFNyJ4DhFZ3GqUgV7MW/2sg==
+
+axios@^1.6.0:
+  version "1.7.2"
+  resolved "https://registry.yarnpkg.com/axios/-/axios-1.7.2.tgz"
+  integrity sha512-2A8QhOMrbomlDuiTeaRNalpbArcajGx/lJN9OIk/yUFTSTiSsOZsu2sOMpIzzfpSLlJSl5YYDUnjzAmYIDuhN3A==
+
+cheerio@^1.0.0-rc.12:
+  version "1.0.0-rc.12"
+  resolved "https://registry.yarnpkg.com/cheerio/-/cheerio-1.0.0-rc.12.tgz"
+  integrity sha512-VqOLnXqLdB+f/8PYYpBumBzVzWAqO6XUwMmfDwEFoLkoeklUxRAEaEI/745zFVwkG2QjJJ/gOchYjIfb+DZjJA==
+
+next@^14:
+  version "14.2.35"
+  resolved "https://registry.yarnpkg.com/next/-/next-14.2.35.tgz"
+  integrity sha512-2v5i50BfK8F5j9QZucdFzjFc9zjGtD69Jr+LpHHuPqgXNQjy4d7B31RiDEKvXFSaRilA4YyFTGwygXOMeA+XqQ==
+
+react@^18:
+  version "18.3.1"
+  resolved "https://registry.yarnpkg.com/react/-/react-18.3.1.tgz"
+  integrity sha512-wS+hAgJShR0meihZBQSft/hQFyRUS9nAbyPEbEcdE/dMM9qWj0H10OuwgjD++8sH82I8fzbJTJih/y2gHw99jw==
+
+react-dom@^18:
+  version "18.3.1"
+  resolved "https://registry.yarnpkg.com/react-dom/-/react-dom-18.3.1.tgz"
+  integrity sha512-5m4nQxZwdlKZuOjwaPh9Q6sLkmBNuF0Ez3wzvLSlWSpqP1pVn6AaQjEYjL7Pfxgwlqzdlxlisr1sTTW5nN2EJ0A==
+
+# Остальные зависимости — Vercel сам добавит
