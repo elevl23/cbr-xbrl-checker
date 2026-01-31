@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
-import StreamZip from 'node-stream-zip';
+import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
 // Список текстовых файлов для сравнения
 const TEXT_EXTENSIONS = [
@@ -31,46 +31,37 @@ const diffLines = (oldLines, newLines) => {
   return result;
 };
 
-// Извлечение всех текстовых файлов
-const extractAllTextFiles = async (rawData, label) => {
+// Извлечение всех текстовых файлов из ArrayBuffer
+const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
-    // ✅ Явно создаём Uint8Array → Buffer
-    const uint8 = new Uint8Array(rawData);
-    const buffer = Buffer.from(uint8);
+    console.log(`🔍 Извлечение из ${label}...`);
 
-    console.log(`🔍 Извлечение из ${label}, размер buffer:`, buffer.length);
+    const blob = new Blob([arrayBuffer], { type: 'application/zip' });
+    const reader = new ZipReader(new BlobReader(blob));
 
-    if (!Buffer.isBuffer(buffer)) {
-      console.error(`❌ buffer не Buffer, а:`, typeof buffer);
-      return null;
-    }
-
-    const zip = new StreamZip.async({ buffer });
-    const entries = await zip.entries();
-
-    console.log(`📄 Файлы в ${label}:`, Object.keys(entries));
+    const entries = await reader.getEntries();
+    console.log(`📄 Найдено файлов в ${label}: ${entries.length}`);
 
     const files = {};
-    for (const [name, entry] of Object.entries(entries)) {
-      if (!entry.isDirectory && isTextFile(name)) {
+
+    for (const entry of entries) {
+      if (!entry.directory && isTextFile(entry.filename)) {
         try {
-          console.log(`📄 Читаем:`, name);
-          const data = await zip.entryData(name);
-          files[name] = data.toString('utf-8');
+          console.log(`📄 Читаем: ${entry.filename}`);
+          const blob = await entry.getData!(new BlobWriter());
+          const text = await blob.text();
+          files[entry.filename] = text;
         } catch (err) {
-          console.error(`❌ Ошибка при чтении ${name}:`, err.message);
-          files[name] = null;
+          console.error(`❌ Ошибка при чтении ${entry.filename}:`, err.message);
+          files[entry.filename] = null;
         }
       }
     }
 
-    await zip.close();
+    await reader.close();
     return files;
   } catch (err) {
     console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
-    try {
-      await zip?.close();
-    } catch (closeErr) {}
     return null;
   }
 };
@@ -90,9 +81,9 @@ export default async function handler(req, res) {
     console.log('📥 Запрос на сравнение:', { old_url, new_url });
 
     // === Скачивание старого ZIP ===
-    let oldData;
+    let oldArrayBuffer;
     try {
-      const res = await axios.get(old_url, {
+      const response = await axios.get(old_url, {
         responseType: 'arraybuffer',
         headers: {
           'User-Agent': 'CBR-Checker/1.0',
@@ -101,15 +92,8 @@ export default async function handler(req, res) {
         timeout: 30000,
         maxContentLength: 10 * 1024 * 1024
       });
-
-      console.log('✅ Старый ZIP скачан, тип:', typeof res.data);
-      console.log('res.data имеет byteLength:', 'byteLength' in res.data);
-
-      if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
-        oldData = res.data;
-      } else {
-        throw new Error('res.data не содержит бинарных данных');
-      }
+      console.log('✅ Старый ZIP скачан, размер:', response.data.byteLength);
+      oldArrayBuffer = response.data;
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
       return res.status(500).json({
@@ -120,9 +104,9 @@ export default async function handler(req, res) {
     }
 
     // === Скачивание нового ZIP ===
-    let newData;
+    let newArrayBuffer;
     try {
-      const res = await axios.get(new_url, {
+      const response = await axios.get(new_url, {
         responseType: 'arraybuffer',
         headers: {
           'User-Agent': 'CBR-Checker/1.0',
@@ -131,15 +115,8 @@ export default async function handler(req, res) {
         timeout: 30000,
         maxContentLength: 10 * 1024 * 1024
       });
-
-      console.log('✅ Новый ZIP скачан, тип:', typeof res.data);
-      console.log('res.data имеет byteLength:', 'byteLength' in res.data);
-
-      if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
-        newData = res.data;
-      } else {
-        throw new Error('res.data не содержит бинарных данных');
-      }
+      console.log('✅ Новый ZIP скачан, размер:', response.data.byteLength);
+      newArrayBuffer = response.data;
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
       return res.status(500).json({
@@ -150,19 +127,17 @@ export default async function handler(req, res) {
     }
 
     // === Извлечение файлов ===
-    let oldFiles = await extractAllTextFiles(oldData, 'старого архива');
+    let oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
     if (!oldFiles) {
       return res.status(500).json({
-        error: 'Не удалось извлечь старый архив',
-        details: 'Ошибка при распаковке или повреждённый ZIP'
+        error: 'Не удалось извлечь старый архив'
       });
     }
 
-    let newFiles = await extractAllTextFiles(newData, 'нового архива');
+    let newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
     if (!newFiles) {
       return res.status(500).json({
-        error: 'Не удалось извлечь новый архив',
-        details: 'Ошибка при распаковке или повреждённый ZIP'
+        error: 'Не удалось извлечь новый архив'
       });
     }
 
