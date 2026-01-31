@@ -40,19 +40,22 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     const reader = new ZipReader(new BlobReader(blob));
 
     const entries = await reader.getEntries();
-    console.log(`📄 Найдено файлов в ${label}: ${entries.length}`);
+    console.log(`📄 Найдено записей в ${label}:`, entries.length);
+
+    if (entries.length === 0) {
+      console.error(`❌ Нет файлов в архиве`);
+      await reader.close();
+      return {};
+    }
 
     // Определяем имя корневой папки
     let rootFolder = '';
-    if (entries.length > 0) {
-      const firstPath = entries[0].filename;
-      const firstSlash = firstPath.indexOf('/');
-      if (firstSlash > 0) {
-        rootFolder = firstPath.substring(0, firstSlash) + '/';
-      }
+    const firstPath = entries[0].filename;
+    const firstSlash = firstPath.indexOf('/');
+    if (firstSlash > 0) {
+      rootFolder = firstPath.substring(0, firstSlash) + '/';
     }
-
-    console.log('📁 Корневая папка:', rootFolder || 'отсутствует');
+    console.log('📁 Корневая папка:', rootFolder || 'не найдена');
 
     const files = {};
 
@@ -77,7 +80,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     return files;
   } catch (err) {
     console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
-    return null;
+    return {};
   }
 };
 
@@ -142,19 +145,8 @@ export default async function handler(req, res) {
     }
 
     // === Извлечение файлов ===
-    let oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
-    if (!oldFiles) {
-      return res.status(500).json({
-        error: 'Не удалось извлечь старый архив'
-      });
-    }
-
-    let newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
-    if (!newFiles) {
-      return res.status(500).json({
-        error: 'Не удалось извлечь новый архив'
-      });
-    }
+    const oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
+    const newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
 
     // === Сравнение ===
     const changes = [];
@@ -199,8 +191,13 @@ export default async function handler(req, res) {
 
     // === Ответ ===
     res.status(200).json({
+      summary: {
+        total_changes: changes.length,
+        added: changes.filter(c => c.type === 'added').length,
+        deleted: changes.filter(c => c.type === 'deleted').length,
+        modified: changes.filter(c => c.type === 'modified').length
+      },
       changes,
-      summary: `Найдено изменений: ${changes.length}`,
       old_version: old_url,
       new_version: new_url
     });
