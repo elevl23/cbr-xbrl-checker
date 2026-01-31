@@ -209,4 +209,7 @@ export default async function handler(req, res) {
     res.status(500).json({
       error: 'Не удалось сравнить архивы',
       message: error.message,
-   
+      stack: error.stack
+    });
+  }
+}
