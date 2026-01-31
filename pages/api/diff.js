@@ -48,7 +48,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       if (!entry.directory && isTextFile(entry.filename)) {
         try {
           console.log(`📄 Читаем: ${entry.filename}`);
-          const blob = await entry.getData!(new BlobWriter());
+          const blob = await entry.getData(new BlobWriter()); // ✅ Исправлено: getData(), без !
           const text = await blob.text();
           files[entry.filename] = text;
         } catch (err) {
