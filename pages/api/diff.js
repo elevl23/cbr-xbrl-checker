@@ -31,7 +31,7 @@ const diffLines = (oldLines, newLines) => {
   return result;
 };
 
-// Извлечение всех текстовых файлов из ArrayBuffer
+// Извлечение всех текстовых файлов
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
     console.log(`🔍 Извлечение из ${label}...`);
@@ -42,15 +42,30 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     const entries = await reader.getEntries();
     console.log(`📄 Найдено файлов в ${label}: ${entries.length}`);
 
+    // 🔧 Определяем имя корневой папки
+    let rootFolder = '';
+    if (entries.length > 0) {
+      const firstPath = entries[0].filename;
+      const firstSlash = firstPath.indexOf('/');
+      if (firstSlash > 0) {
+        rootFolder = firstPath.substring(0, firstSlash) + '/';
+      }
+    }
+
+    console.log('📁 Корневая папка:', rootFolder || 'отсутствует');
+
     const files = {};
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
         try {
-          console.log(`📄 Читаем: ${entry.filename}`);
-          const blob = await entry.getData(new BlobWriter()); // ✅ Исправлено: getData(), без !
+          // 🔧 Убираем имя корневой папки
+          const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
+
+          console.log(`📄 Читаем: ${relativePath}`);
+          const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
-          files[entry.filename] = text;
+          files[relativePath] = text;
         } catch (err) {
           console.error(`❌ Ошибка при чтении ${entry.filename}:`, err.message);
           files[entry.filename] = null;
@@ -194,7 +209,4 @@ export default async function handler(req, res) {
     res.status(500).json({
       error: 'Не удалось сравнить архивы',
       message: error.message,
-      stack: error.stack
-    });
-  }
-}
+   
