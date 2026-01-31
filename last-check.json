@@ -2,19 +2,23 @@
   "files": {
     "taxonomy": {
       "name": "Финальная таксономия (версия 6.1.0.5)",
+      "url": "https://www.cbr.ru/Content/Document/File/172024/final_6_1_0_5.zip",
       "version": "6.1.0.5",
       "date": "2025-01-24"
     },
     "order": {
       "name": "Порядок составления и представления...",
+      "url": "https://www.cbr.ru/Content/Document/File/172025/inf_note_jan_2425.pdf",
       "date": "2025-01-24"
     },
     "materials": {
       "name": "Сопроводительные материалы",
+      "url": "https://www.cbr.ru/Content/Document/File/172026/predv_sopr_uod_purcb_6_1_0_5.zip",
       "date": "2025-01-24"
     },
     "guidelines": {
       "name": "Методические рекомендации",
+      "url": "https://www.cbr.ru/Content/Document/File/172027/predv_mr_uod_purcb_6_1_0_5.zip",
       "date": "2025-01-24"
     }
   }
