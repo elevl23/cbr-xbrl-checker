@@ -17,7 +17,6 @@ export default async function handler(req, res) {
     });
 
     const $ = cheerio.load(response.data);
-
     const current = {
       taxonomy: null,
       order: null,
@@ -31,18 +30,16 @@ export default async function handler(req, res) {
       const href = $link.attr('href');
       const text = $link.text().trim();
 
-      if (!href || (!href.includes('.zip') && !href.includes('.pdf'))) return;
+      if (!href || !href.includes('.zip') && !href.includes('.pdf')) return;
 
       const url = new URL(href, 'https://www.cbr.ru').href;
 
-      // Извлекаем версию
       let version = null;
       const versionMatch = text.match(/версия\s*([\d.]+)/i);
       if (versionMatch) {
         version = versionMatch[1];
       }
 
-      // Извлекаем дату
       let date = null;
       const $dateEl = $el.find('.document-regular_date');
       if ($dateEl.length > 0) {
@@ -53,7 +50,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Классифицируем по названию
       if (text.includes('Финальная таксономия')) {
         current.taxonomy = { name: text, url, version, date };
       } else if (text.includes('Порядок составления и представления')) {
@@ -101,7 +97,11 @@ export default async function handler(req, res) {
             name: curr.name,
             url: curr.url,
             version: { from: prev.version, to: curr.version },
-            date: { from: prev.date, to: curr.date }
+            date: { from: prev.date, to: curr.date },
+            urls: {
+              old_url: prev.url,
+              new_url: curr.url
+            }
           });
         }
       }
