@@ -42,7 +42,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     const entries = await reader.getEntries();
     console.log(`📄 Найдено файлов в ${label}: ${entries.length}`);
 
-    // 🔧 Определяем имя корневой папки
+    // Определяем имя корневой папки
     let rootFolder = '';
     if (entries.length > 0) {
       const firstPath = entries[0].filename;
@@ -59,7 +59,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
         try {
-          // 🔧 Убираем имя корневой папки
+          // Убираем имя корневой папки
           const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
 
           console.log(`📄 Читаем: ${relativePath}`);
