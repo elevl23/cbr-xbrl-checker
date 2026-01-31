@@ -32,8 +32,12 @@ const diffLines = (oldLines, newLines) => {
 };
 
 // Извлечение всех текстовых файлов
-const extractAllTextFiles = async (buffer, label) => {
+const extractAllTextFiles = async (rawData, label) => {
   try {
+    // ✅ Явно создаём Uint8Array → Buffer
+    const uint8 = new Uint8Array(rawData);
+    const buffer = Buffer.from(uint8);
+
     console.log(`🔍 Извлечение из ${label}, размер buffer:`, buffer.length);
 
     if (!Buffer.isBuffer(buffer)) {
@@ -41,7 +45,6 @@ const extractAllTextFiles = async (buffer, label) => {
       return null;
     }
 
-    // ✅ Убедимся, что buffer — это Buffer
     const zip = new StreamZip.async({ buffer });
     const entries = await zip.entries();
 
@@ -87,7 +90,7 @@ export default async function handler(req, res) {
     console.log('📥 Запрос на сравнение:', { old_url, new_url });
 
     // === Скачивание старого ZIP ===
-    let oldBuffer;
+    let oldData;
     try {
       const res = await axios.get(old_url, {
         responseType: 'arraybuffer',
@@ -103,14 +106,9 @@ export default async function handler(req, res) {
       console.log('res.data имеет byteLength:', 'byteLength' in res.data);
 
       if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
-        console.log('✅ res.data — ArrayBuffer (по структуре)');
-        // ✅ Явно создаём Buffer из ArrayBuffer
-        oldBuffer = Buffer.from(res.data);
-      } else if (typeof res.data === 'string') {
-        console.log('⚠️ res.data — строка, преобразуем как binary');
-        oldBuffer = Buffer.from(res.data, 'binary');
+        oldData = res.data;
       } else {
-        throw new Error('Неизвестный формат данных: не ArrayBuffer и не строка');
+        throw new Error('res.data не содержит бинарных данных');
       }
     } catch (err) {
       console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
@@ -122,7 +120,7 @@ export default async function handler(req, res) {
     }
 
     // === Скачивание нового ZIP ===
-    let newBuffer;
+    let newData;
     try {
       const res = await axios.get(new_url, {
         responseType: 'arraybuffer',
@@ -138,13 +136,9 @@ export default async function handler(req, res) {
       console.log('res.data имеет byteLength:', 'byteLength' in res.data);
 
       if (res.data && typeof res.data === 'object' && 'byteLength' in res.data) {
-        console.log('✅ res.data — ArrayBuffer (по структуре)');
-        newBuffer = Buffer.from(res.data);
-      } else if (typeof res.data === 'string') {
-        console.log('⚠️ res.data — строка, преобразуем как binary');
-        newBuffer = Buffer.from(res.data, 'binary');
+        newData = res.data;
       } else {
-        throw new Error('Неизвестный формат данных: не ArrayBuffer и не строка');
+        throw new Error('res.data не содержит бинарных данных');
       }
     } catch (err) {
       console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
@@ -156,7 +150,7 @@ export default async function handler(req, res) {
     }
 
     // === Извлечение файлов ===
-    let oldFiles = await extractAllTextFiles(oldBuffer, 'старого архива');
+    let oldFiles = await extractAllTextFiles(oldData, 'старого архива');
     if (!oldFiles) {
       return res.status(500).json({
         error: 'Не удалось извлечь старый архив',
@@ -164,7 +158,7 @@ export default async function handler(req, res) {
       });
     }
 
-    let newFiles = await extractAllTextFiles(newBuffer, 'нового архива');
+    let newFiles = await extractAllTextFiles(newData, 'нового архива');
     if (!newFiles) {
       return res.status(500).json({
         error: 'Не удалось извлечь новый архив',
