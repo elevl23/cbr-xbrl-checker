@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
@@ -79,14 +78,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Не хватает old_url или new_url' });
     }
 
-    console.log('📥 Сравнение:', { old_url, new_url });
+    console.log('📥 Генерация детального отчёта:', { old_url, new_url });
 
     const download = async (url, label) => {
       try {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           headers: { 'User-Agent': 'CBR-Checker/1.0' },
-          timeout: 20000,
+          timeout: 30000,
           maxContentLength: 15 * 1024 * 1024
         });
         console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
@@ -133,13 +132,40 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
-    // ✅ Только summary — без CSV, без Blob, без base64
-    return res.status(200).json({ summary });
+    // === ГЕНЕРАЦИЯ CSV ===
+    const jsonToCsv = (changes) => {
+      const separator = ',';
+      const header = ['type', 'file', 'change_type', 'line'].join(separator);
+      const rows = changes.flatMap(item => {
+        if (item.type === 'modified') {
+          return item.diff.map(d => {
+            const changeType = d.type === 'same' ? 'без изменений' : d.type;
+            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+          });
+        } else {
+          return [`"${item.type}","${item.file}","-","-"`];
+        }
+      });
+      return [header, ...rows].join('\n');
+    };
+
+    const csv = jsonToCsv(changes);
+
+    // === КОНВЕРТАЦИЯ В data:text/csv;base64 ===
+    const base64 = Buffer.from(csv).toString('base64');
+    const report_url = `data:text/csv;base64,${base64}`;
+
+    // === ОТВЕТ ===
+    return res.status(200).json({
+      summary,
+      report_url,
+      message: 'Готово. Отчёт встроен в ссылку.'
+    });
 
   } catch (error) {
-    console.error('💥 Критическая ошибка:', error.message);
+    console.error('💥 Ошибка при генерации детального отчёта:', error.message);
     return res.status(500).json({
-      error: 'Не удалось сравнить архивы',
+      error: 'Не удалось создать отчёт',
       message: error.message
     });
   }
