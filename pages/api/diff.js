@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
-import { put } from '@vercel/blob';
 
 // Текстовые расширения
 const TEXT_EXTENSIONS = ['.xml', '.xsd', '.csv', '.ddl', '.json', '.yml', '.yaml', '.sql'];
@@ -153,17 +152,14 @@ export default async function handler(req, res) {
 
     const csv = jsonToCsv(changes);
 
-    // === СОХРАНЕНИЕ В BLOB ===
-    const filename = `xbrl-diff-${Date.now()}.csv`;
-    const blob = await put(filename, csv, {
-      access: 'public',
-      contentType: 'text/csv; charset=utf-8',
-    });
+    // === КОНВЕРТИРУЕМ CSV В data:text/csv;base64 ===
+    const base64 = Buffer.from(csv).toString('base64');
+    const dataUrl = `data:text/csv;base64,${base64}`;
 
     // === ОТВЕТ ===
     return res.status(200).json({
       summary,
-      report_url: blob.url,
+      report_url: dataUrl,
       message: 'Готово. Ниже — отчёт по изменениям.'
     });
 
@@ -175,5 +171,3 @@ export default async function handler(req, res) {
     });
   }
 }
-
-
