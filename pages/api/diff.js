@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
+import { put } from '@vercel/blob';
 
-// Текстовые расширения для сравнения
+// Текстовые расширения
 const TEXT_EXTENSIONS = ['.xml', '.xsd', '.csv', '.ddl', '.json', '.yml', '.yaml', '.sql'];
 
 const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// Построчное сравнение
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
@@ -28,16 +28,13 @@ const diffLines = (oldLines, newLines) => {
   return result;
 };
 
-// Извлечение текстовых файлов
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
-    console.log(`🔍 Извлечение из ${label}...`);
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
 
     if (entries.length === 0) {
-      console.error(`❌ Нет файлов в архиве`);
       await reader.close();
       return {};
     }
@@ -58,7 +55,6 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
           const text = await blob.text();
           files[relativePath] = text;
         } catch (err) {
-          console.error(`❌ Ошибка при чтении ${entry.filename}:`, err.message);
           files[relativePath] = null;
         }
       }
@@ -86,7 +82,6 @@ export default async function handler(req, res) {
 
     console.log('📥 Сравнение:', { old_url, new_url });
 
-    // Скачивание архивов
     const download = async (url, label) => {
       try {
         const response = await axios.get(url, {
@@ -106,11 +101,9 @@ export default async function handler(req, res) {
     const oldArrayBuffer = await download(old_url, 'старый ZIP');
     const newArrayBuffer = await download(new_url, 'новый ZIP');
 
-    // Извлечение
     const oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
     const newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
 
-    // Сравнение
     const changes = [];
 
     for (const name of Object.keys(oldFiles)) {
@@ -134,7 +127,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Подсчёт
     const summary = {
       total_changes: changes.length,
       added: changes.filter(c => c.type === 'added').length,
@@ -161,18 +153,23 @@ export default async function handler(req, res) {
 
     const csv = jsonToCsv(changes);
 
-    // === ОТВЕТ: JSON + CSV как файл ===
-    // Устанавливаем заголовки для скачивания файла
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="xbrl-changes.csv"');
-    res.setHeader('X-Summary', JSON.stringify(summary)); // для отладки
+    // === СОХРАНЕНИЕ В BLOB ===
+    const filename = `xbrl-diff-${Date.now()}.csv`;
+    const blob = await put(filename, csv, {
+      access: 'public',
+      contentType: 'text/csv; charset=utf-8',
+    });
 
-    // Отправляем CSV
-    res.status(200).send(csv);
+    // === ОТВЕТ ===
+    return res.status(200).json({
+      summary,
+      report_url: blob.url,
+      message: 'Готово. Ниже — отчёт по изменениям.'
+    });
 
   } catch (error) {
     console.error('💥 Критическая ошибка:', error.message);
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Не удалось сравнить архивы',
       message: error.message
     });
