@@ -2,11 +2,8 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
-// Список текстовых файлов для сравнения
-const TEXT_EXTENSIONS = [
-  '.xml', '.json', '.csv', '.ddl', '.txt',
-  '.sql', '.yml', '.yaml', '.xsd'
-];
+// Текстовые расширения для сравнения
+const TEXT_EXTENSIONS = ['.xml', '.xsd', '.csv', '.ddl', '.json', '.yml', '.yaml', '.sql'];
 
 const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
@@ -31,16 +28,13 @@ const diffLines = (oldLines, newLines) => {
   return result;
 };
 
-// Извлечение всех текстовых файлов
+// Извлечение текстовых файлов
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
     console.log(`🔍 Извлечение из ${label}...`);
-
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
-
     const entries = await reader.getEntries();
-    console.log(`📄 Найдено записей в ${label}:`, entries.length);
 
     if (entries.length === 0) {
       console.error(`❌ Нет файлов в архиве`);
@@ -48,30 +42,24 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       return {};
     }
 
-    // Определяем имя корневой папки
     let rootFolder = '';
-    const firstPath = entries[0].filename;
-    const firstSlash = firstPath.indexOf('/');
+    const firstSlash = entries[0].filename.indexOf('/');
     if (firstSlash > 0) {
-      rootFolder = firstPath.substring(0, firstSlash) + '/';
+      rootFolder = entries[0].filename.substring(0, firstSlash) + '/';
     }
-    console.log('📁 Корневая папка:', rootFolder || 'не найдена');
 
     const files = {};
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
+        const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
         try {
-          // Убираем имя корневой папки
-          const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
-
-          console.log(`📄 Читаем: ${relativePath}`);
           const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
           files[relativePath] = text;
         } catch (err) {
           console.error(`❌ Ошибка при чтении ${entry.filename}:`, err.message);
-          files[entry.filename] = null;
+          files[relativePath] = null;
         }
       }
     }
@@ -96,117 +84,97 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Не хватает old_url или new_url' });
     }
 
-    console.log('📥 Запрос на сравнение:', { old_url, new_url });
+    console.log('📥 Сравнение:', { old_url, new_url });
 
-    // === Скачивание старого ZIP ===
-    let oldArrayBuffer;
-    try {
-      const response = await axios.get(old_url, {
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'CBR-Checker/1.0',
-          'Accept': 'application/zip'
-        },
-        timeout: 30000,
-        maxContentLength: 10 * 1024 * 1024
-      });
-      console.log('✅ Старый ZIP скачан, размер:', response.data.byteLength);
-      oldArrayBuffer = response.data;
-    } catch (err) {
-      console.error('❌ Ошибка при скачивании старого ZIP:', err.message);
-      return res.status(500).json({
-        error: 'Не удалось скачать старый ZIP',
-        url: old_url,
-        message: err.message
-      });
-    }
+    // Скачивание архивов
+    const download = async (url, label) => {
+      try {
+        const response = await axios.get(url, {
+          responseType: 'arraybuffer',
+          headers: { 'User-Agent': 'CBR-Checker/1.0' },
+          timeout: 20000,
+          maxContentLength: 15 * 1024 * 1024
+        });
+        console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
+        return response.data;
+      } catch (err) {
+        console.error(`❌ Ошибка при скачивании ${label}:`, err.message);
+        throw new Error(`Не удалось скачать ${label}`);
+      }
+    };
 
-    // === Скачивание нового ZIP ===
-    let newArrayBuffer;
-    try {
-      const response = await axios.get(new_url, {
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'CBR-Checker/1.0',
-          'Accept': 'application/zip'
-        },
-        timeout: 30000,
-        maxContentLength: 10 * 1024 * 1024
-      });
-      console.log('✅ Новый ZIP скачан, размер:', response.data.byteLength);
-      newArrayBuffer = response.data;
-    } catch (err) {
-      console.error('❌ Ошибка при скачивании нового ZIP:', err.message);
-      return res.status(500).json({
-        error: 'Не удалось скачать новый ZIP',
-        url: new_url,
-        message: err.message
-      });
-    }
+    const oldArrayBuffer = await download(old_url, 'старый ZIP');
+    const newArrayBuffer = await download(new_url, 'новый ZIP');
 
-    // === Извлечение файлов ===
+    // Извлечение
     const oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
     const newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
 
-    // === Сравнение ===
+    // Сравнение
     const changes = [];
 
-    // Удалённые файлы
     for (const name of Object.keys(oldFiles)) {
       if (!newFiles[name]) {
-        changes.push({
-          type: 'deleted',
-          file: name,
-          summary: 'Файл удалён'
-        });
+        changes.push({ type: 'deleted', file: name, summary: 'Файл удалён' });
       }
     }
 
-    // Новые файлы
     for (const name of Object.keys(newFiles)) {
       if (!oldFiles[name]) {
-        changes.push({
-          type: 'added',
-          file: name,
-          summary: 'Файл добавлен'
-        });
+        changes.push({ type: 'added', file: name, summary: 'Файл добавлен' });
       }
     }
 
-    // Изменённые файлы
     for (const name of Object.keys(newFiles)) {
       if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
         const oldLines = oldFiles[name].split('\n');
         const newLines = newFiles[name].split('\n');
         const diff = diffLines(oldLines, newLines);
-
-        changes.push({
-          type: 'modified',
-          file: name,
-          diff,
-          summary: 'Файл изменён'
-        });
+        changes.push({ type: 'modified', file: name, diff, summary: 'Файл изменён' });
       }
     }
 
-    // === Ответ ===
-    res.status(200).json({
-      summary: {
-        total_changes: changes.length,
-        added: changes.filter(c => c.type === 'added').length,
-        deleted: changes.filter(c => c.type === 'deleted').length,
-        modified: changes.filter(c => c.type === 'modified').length
-      },
-      changes,
-      old_version: old_url,
-      new_version: new_url
-    });
+    // Подсчёт
+    const summary = {
+      total_changes: changes.length,
+      added: changes.filter(c => c.type === 'added').length,
+      deleted: changes.filter(c => c.type === 'deleted').length,
+      modified: changes.filter(c => c.type === 'modified').length
+    };
+
+    // === ГЕНЕРАЦИЯ CSV ===
+    const jsonToCsv = (changes) => {
+      const separator = ',';
+      const header = ['type', 'file', 'change_type', 'line'].join(separator);
+      const rows = changes.flatMap(item => {
+        if (item.type === 'modified') {
+          return item.diff.map(d => {
+            const changeType = d.type === 'same' ? 'без изменений' : d.type;
+            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+          });
+        } else {
+          return [`"${item.type}","${item.file}","-","-"`];
+        }
+      });
+      return [header, ...rows].join('\n');
+    };
+
+    const csv = jsonToCsv(changes);
+
+    // === ОТВЕТ: JSON + CSV как файл ===
+    // Устанавливаем заголовки для скачивания файла
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="xbrl-changes.csv"');
+    res.setHeader('X-Summary', JSON.stringify(summary)); // для отладки
+
+    // Отправляем CSV
+    res.status(200).send(csv);
+
   } catch (error) {
     console.error('💥 Критическая ошибка:', error.message);
     res.status(500).json({
       error: 'Не удалось сравнить архивы',
-      message: error.message,
-      stack: error.stack
+      message: error.message
     });
   }
 }
