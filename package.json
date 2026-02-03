@@ -14,7 +14,8 @@
     "cheerio": "^1.0.0-rc.12",
     "next": "^14",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "@vercel/blob": "^1.1.0"
   },
   "engines": {
     "node": ">=18"
