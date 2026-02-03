@@ -107,13 +107,13 @@ export default async function handler(req, res) {
 
     for (const name of Object.keys(oldFiles)) {
       if (!newFiles[name]) {
-        changes.push({ type: 'deleted', file: name, summary: 'Файл удалён' });
+        changes.push({ type: 'deleted', file: name });
       }
     }
 
     for (const name of Object.keys(newFiles)) {
       if (!oldFiles[name]) {
-        changes.push({ type: 'added', file: name, summary: 'Файл добавлен' });
+        changes.push({ type: 'added', file: name });
       }
     }
 
@@ -122,7 +122,7 @@ export default async function handler(req, res) {
         const oldLines = oldFiles[name].split('\n');
         const newLines = newFiles[name].split('\n');
         const diff = diffLines(oldLines, newLines);
-        changes.push({ type: 'modified', file: name, diff, summary: 'Файл изменён' });
+        changes.push({ type: 'modified', file: name, diff });
       }
     }
 
@@ -133,35 +133,8 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
-    // === ГЕНЕРАЦИЯ CSV ===
-    const jsonToCsv = (changes) => {
-      const separator = ',';
-      const header = ['type', 'file', 'change_type', 'line'].join(separator);
-      const rows = changes.flatMap(item => {
-        if (item.type === 'modified') {
-          return item.diff.map(d => {
-            const changeType = d.type === 'same' ? 'без изменений' : d.type;
-            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
-          });
-        } else {
-          return [`"${item.type}","${item.file}","-","-"`];
-        }
-      });
-      return [header, ...rows].join('\n');
-    };
-
-    const csv = jsonToCsv(changes);
-
-    // === КОНВЕРТИРУЕМ CSV В data:text/csv;base64 ===
-    const base64 = Buffer.from(csv).toString('base64');
-    const dataUrl = `data:text/csv;base64,${base64}`;
-
-    // === ОТВЕТ ===
-    return res.status(200).json({
-      summary,
-      report_url: dataUrl,
-      message: 'Готово. Ниже — отчёт по изменениям.'
-    });
+    // ✅ Только summary — без CSV, без Blob, без base64
+    return res.status(200).json({ summary });
 
   } catch (error) {
     console.error('💥 Критическая ошибка:', error.message);
