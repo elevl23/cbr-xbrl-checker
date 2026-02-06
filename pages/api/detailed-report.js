@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
 // Текстовые расширения
 const TEXT_EXTENSIONS = ['.xml', '.xsd', '.csv', '.ddl', '.json', '.yml', '.yaml', '.sql'];
@@ -27,7 +28,6 @@ const diffLines = (oldLines, newLines) => {
 
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
-    const { ZipReader, BlobReader, BlobWriter } = await import('@zip.js/zip.js');
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
@@ -47,7 +47,10 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
+        // Убираем папки с датами вида /2025-02-25/
+        const normalizedPath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+        const relativePath = rootFolder ? normalizedPath.replace(rootFolder, '') : normalizedPath;
+
         try {
           const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
@@ -85,7 +88,7 @@ export default async function handler(req, res) {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           headers: { 'User-Agent': 'CBR-Checker/1.0' },
-          timeout: 20000,
+          timeout: 30000,
           maxContentLength: 15 * 1024 * 1024
         });
         console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
@@ -125,16 +128,25 @@ export default async function handler(req, res) {
       }
     }
 
-    // === ГЕНЕРАЦИЯ CSV ===
+    const summary = {
+      total_changes: changes.length,
+      added: changes.filter(c => c.type === 'added').length,
+      deleted: changes.filter(c => c.type === 'deleted').length,
+      modified: changes.filter(c => c.type === 'modified').length
+    };
+
+    // === ГЕНЕРАЦИЯ CSV — БЕЗ СТРОК "БЕЗ ИЗМЕНЕНИЙ" ===
     const jsonToCsv = (changes) => {
       const separator = ',';
       const header = ['type', 'file', 'change_type', 'line'].join(separator);
       const rows = changes.flatMap(item => {
         if (item.type === 'modified') {
-          return item.diff.map(d => {
-            const changeType = d.type === 'same' ? 'без изменений' : d.type;
-            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
-          });
+          return item.diff
+            .filter(d => d.type !== 'same') // 🔥 Только реальные изменения
+            .map(d => {
+              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+              return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+            });
         } else {
           return [`"${item.type}","${item.file}","-","-"`];
         }
@@ -144,43 +156,15 @@ export default async function handler(req, res) {
 
     const csv = jsonToCsv(changes);
 
-    // === ОТПРАВКА В GITHUB GIST ===
-    const GIST_TOKEN = process.env.GITHUB_GIST_TOKEN;
-
-    if (!GIST_TOKEN) {
-      return res.status(500).json({
-        error: 'GITHUB_GIST_TOKEN не настроен',
-        message: 'Не удалось создать отчёт. Обратитесь к администратору.'
-      });
-    }
-
-    const gistResponse = await axios.post('https://api.github.com/gists', {
-      description: 'CBR XBRL-CSV Diff Report',
-      public: true,
-      files: {
-        'xbrl-changes.csv': {
-          content: csv
-        }
-      }
-    }, {
-      headers: {
-        'Authorization': `Bearer ${GIST_TOKEN}`,
-        'User-Agent': 'cbr-xbrl-checker'
-      }
-    });
-
-    const gistUrl = gistResponse.data.html_url;
+    // === КОНВЕРТАЦИЯ В data:text/csv;base64 ===
+    const base64 = Buffer.from(csv).toString('base64');
+    const report_url = `data:text/csv;base64,${base64}`;
 
     // === ОТВЕТ ===
     return res.status(200).json({
-      summary: {
-        total_changes: changes.length,
-        added: changes.filter(c => c.type === 'added').length,
-        deleted: changes.filter(c => c.type === 'deleted').length,
-        modified: changes.filter(c => c.type === 'modified').length
-      },
-      report_url: gistUrl,
-      message: 'Готово. Полный отчёт доступен по ссылке.'
+      summary,
+      report_url,
+      message: 'Готово. Только реальные изменения.'
     });
 
   } catch (error) {
