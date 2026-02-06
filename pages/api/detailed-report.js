@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
 // Текстовые расширения
 const TEXT_EXTENSIONS = ['.xml', '.xsd', '.csv', '.ddl', '.json', '.yml', '.yaml', '.sql'];
@@ -7,14 +8,43 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
+// Нормализация XSD-элементов
+const normalizeXsdElement = (line) => {
+  const match = line.match(/<xsd:element\s+(.*?)\s*\/>/);
+  if (!match) return line;
+
+  const attrsStr = match[1];
+  const attrs = {};
+
+  attrsStr.replace(/(\w+:[\w-]+|[\w-]+)\s*=\s*"([^"]*)"/g, (_, key, value) => {
+    attrs[key] = value;
+  });
+
+  const sortedKeys = Object.keys(attrs).sort();
+  const sortedAttrs = sortedKeys.map(key => `${key}="${attrs[key]}"`).join(' ');
+
+  return `<xsd:element ${sortedAttrs}/>`;
+};
+
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
   while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-      result.push({ type: 'same', value: oldLines[i] });
-      i++; j++;
-    } else if (j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length) {
+      const oldLine = oldLines[i].trim();
+      const newLine = newLines[j].trim();
+
+      const normOld = oldLine.includes('<xsd:element') ? normalizeXsdElement(oldLine) : oldLine;
+      const normNew = newLine.includes('<xsd:element') ? normalizeXsdElement(newLine) : newLine;
+
+      if (normOld === normNew) {
+        result.push({ type: 'same', value: oldLines[i] });
+        i++; j++;
+        continue;
+      }
+    }
+
+    if (j < newLines.length) {
       result.push({ type: 'added', value: newLines[j] });
       j++;
     } else {
@@ -27,7 +57,6 @@ const diffLines = (oldLines, newLines) => {
 
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
-    const { ZipReader, BlobReader, BlobWriter } = await import('@zip.js/zip.js');
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
@@ -47,7 +76,6 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        // Убираем папки с датами: /2025-02-25/ → удаляется
         const normalizedPath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
         const relativePath = rootFolder ? normalizedPath.replace(rootFolder, '') : normalizedPath;
 
@@ -88,7 +116,7 @@ export default async function handler(req, res) {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           headers: { 'User-Agent': 'CBR-Checker/1.0' },
-          timeout: 20000,
+          timeout: 30000,
           maxContentLength: 15 * 1024 * 1024
         });
         console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
@@ -128,6 +156,13 @@ export default async function handler(req, res) {
       }
     }
 
+    const summary = {
+      total_changes: changes.length,
+      added: changes.filter(c => c.type === 'added').length,
+      deleted: changes.filter(c => c.type === 'deleted').length,
+      modified: changes.filter(c => c.type === 'modified').length
+    };
+
     // === ГЕНЕРАЦИЯ CSV — БЕЗ СТРОК "БЕЗ ИЗМЕНЕНИЙ" ===
     const jsonToCsv = (changes) => {
       const separator = ',';
@@ -135,7 +170,7 @@ export default async function handler(req, res) {
       const rows = changes.flatMap(item => {
         if (item.type === 'modified') {
           return item.diff
-            .filter(d => d.type !== 'same') // 🔥 Убираем неизменённые строки
+            .filter(d => d.type !== 'same')
             .map(d => {
               const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
               return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
@@ -178,12 +213,7 @@ export default async function handler(req, res) {
 
     // === ОТВЕТ ===
     return res.status(200).json({
-      summary: {
-        total_changes: changes.length,
-        added: changes.filter(c => c.type === 'added').length,
-        deleted: changes.filter(c => c.type === 'deleted').length,
-        modified: changes.filter(c => c.type === 'modified').length
-      },
+      summary,
       report_url: gistUrl,
       message: 'Готово. Только реальные изменения.'
     });
