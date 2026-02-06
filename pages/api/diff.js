@@ -48,7 +48,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        // Убираем папки с датами вида /2025-02-25/
+        // Убираем папки с датами: /2025-02-25/ → удаляется
         const normalizedPath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
         const relativePath = rootFolder ? normalizedPath.replace(rootFolder, '') : normalizedPath;
 
@@ -136,6 +136,7 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
+    // ✅ Только summary — для агента
     return res.status(200).json({ summary });
 
   } catch (error) {
