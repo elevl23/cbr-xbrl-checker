@@ -9,14 +9,45 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
+// Нормализация XSD-элементов: сортировка атрибутов
+const normalizeXsdElement = (line) => {
+  const match = line.match(/<xsd:element\s+(.*?)\s*\/>/);
+  if (!match) return line;
+
+  const attrsStr = match[1];
+  const attrs = {};
+
+  // Простой парсинг атрибутов (для xsd:element)
+  attrsStr.replace(/(\w+:[\w-]+|[\w-]+)\s*=\s*"([^"]*)"/g, (_, key, value) => {
+    attrs[key] = value;
+  });
+
+  const sortedKeys = Object.keys(attrs).sort();
+  const sortedAttrs = sortedKeys.map(key => `${key}="${attrs[key]}"`).join(' ');
+
+  return `<xsd:element ${sortedAttrs}/>`;
+};
+
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
   while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-      result.push({ type: 'same', value: oldLines[i] });
-      i++; j++;
-    } else if (j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length) {
+      const oldLine = oldLines[i].trim();
+      const newLine = newLines[j].trim();
+
+      // Нормализуем строки с xsd:element
+      const normOld = oldLine.includes('<xsd:element') ? normalizeXsdElement(oldLine) : oldLine;
+      const normNew = newLine.includes('<xsd:element') ? normalizeXsdElement(newLine) : newLine;
+
+      if (normOld === normNew) {
+        result.push({ type: 'same', value: oldLines[i] });
+        i++; j++;
+        continue;
+      }
+    }
+
+    if (j < newLines.length) {
       result.push({ type: 'added', value: newLines[j] });
       j++;
     } else {
@@ -136,7 +167,6 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
-    // ✅ Только summary — для агента
     return res.status(200).json({ summary });
 
   } catch (error) {
