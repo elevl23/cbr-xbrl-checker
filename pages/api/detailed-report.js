@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
 // Текстовые расширения
 const TEXT_EXTENSIONS = ['.xml', '.xsd', '.csv', '.ddl', '.json', '.yml', '.yaml', '.sql'];
@@ -8,78 +7,67 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// === НОРМАЛИЗАЦИЯ XSD-ЭЛЕМЕНТОВ (сортировка атрибутов) ===
-const normalizeXsdElement = (line) => {
-  const match = line.trim().match(/<xsd:element\s+(.*?)\s*\/>/);
-  if (!match) return line;
-
-  const attrsStr = match[1];
-  const attrs = {};
-
-  attrsStr.replace(/(\w+:[\w-]+|[\w-]+)\s*=\s*"([^"]*)"/g, (_, key, value) => {
-    attrs[key] = value;
-  });
-
-  const sortedKeys = Object.keys(attrs).sort();
-  const sortedAttrs = sortedKeys.map(key => `${key}="${attrs[key]}"`).join(' ');
-
-  return `<xsd:element ${sortedAttrs}/>`;
-};
-
-// === УНИВЕРСАЛЬНАЯ НОРМАЛИЗАЦИЯ СТРОКИ ===
-const normalizeLine = (line) => {
-  if (!line) return '';
-
-  line = line
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\ufeff/g, '') // BOM
-    .replace(/\s+/g, ' ')   // много пробелов → один
-    .trim();
-
-  if (line.startsWith('<xsd:element') && line.endsWith('/>')) {
-    return normalizeXsdElement(line);
-  }
-
-  return line;
-};
-
-// === СРАВНЕНИЕ СТРОК БЕЗ УЧЁТА ПОРЯДКА ===
+// === УЛУЧШЕННОЕ СРАВНЕНИЕ СТРОК С ПЕРЕСИНХРОНИЗАЦИЕЙ ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
-  const processedNew = new Set();
+  let i = 0, j = 0;
 
-  const oldNorm = oldLines
-    .map((line, i) => ({ line, norm: normalizeLine(line), index: i }))
-    .filter(item => item.norm);
+  const MAX_LOOKAHEAD = 30; // Максимум на сколько строк вперёд искать совпадение
 
-  const newNorm = newLines
-    .map((line, i) => ({ line, norm: normalizeLine(line), index: i }))
-    .filter(item => item.norm);
-
-  const newNormMap = new Map();
-  for (const item of newNorm) {
-    if (!newNormMap.has(item.norm)) {
-      newNormMap.set(item.norm, []);
+  while (i < oldLines.length || j < newLines.length) {
+    // Если строки совпадают — просто идём дальше
+    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+      result.push({ type: 'same', value: oldLines[i] });
+      i++;
+      j++;
+      continue;
     }
-    newNormMap.get(item.norm).push(item);
-  }
 
-  for (const oldItem of oldNorm) {
-    const matches = newNormMap.get(oldItem.norm);
-    const match = matches?.find(n => !processedNew.has(n.index)) || null;
+    let foundMatch = false;
 
-    if (match) {
-      result.push({ type: 'same', value: oldItem.line });
-      processedNew.add(match.index);
-    } else {
-      result.push({ type: 'removed', value: oldItem.line });
+    // === Проверка: возможно, вставлено несколько строк (ищем вперёд в newLines) ===
+    const currentOldLine = oldLines[i]?.trim();
+    if (currentOldLine) {
+      for (let k = 1; k <= MAX_LOOKAHEAD && j + k < newLines.length; k++) {
+        if (newLines[j + k].trim() === currentOldLine) {
+          // Нашли совпадение — значит, строки с j до j+k были добавлены
+          while (j < j + k) {
+            result.push({ type: 'added', value: newLines[j] });
+            j++;
+          }
+          foundMatch = true;
+          break;
+        }
+      }
     }
-  }
 
-  for (const newItem of newNorm) {
-    if (!processedNew.has(newItem.index)) {
-      result.push({ type: 'added', value: newItem.line });
+    if (foundMatch) continue;
+
+    // === Проверка: возможно, удалено несколько строк (ищем вперёд в oldLines) ===
+    const currentNewLine = newLines[j]?.trim();
+    if (currentNewLine) {
+      for (let k = 1; k <= MAX_LOOKAHEAD && i + k < oldLines.length; k++) {
+        if (oldLines[i + k].trim() === currentNewLine) {
+          // Нашли — значит, строки с i до i+k были удалены
+          while (i < i + k) {
+            result.push({ type: 'removed', value: oldLines[i] });
+            i++;
+          }
+          foundMatch = true;
+          break;
+        }
+      }
+    }
+
+    if (foundMatch) continue;
+
+    // === Стандартное поведение, если ничего не найдено ===
+    if (j < newLines.length) {
+      result.push({ type: 'added', value: newLines[j] });
+      j++;
+    } else if (i < oldLines.length) {
+      result.push({ type: 'removed', value: oldLines[i] });
+      i++;
     }
   }
 
@@ -89,6 +77,7 @@ const diffLines = (oldLines, newLines) => {
 // === ИЗВЛЕЧЕНИЕ ТЕКСТОВЫХ ФАЙЛОВ ИЗ ZIP ===
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
+    const { ZipReader, BlobReader, BlobWriter } = await import('@zip.js/zip.js');
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
@@ -108,23 +97,12 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        const normalizedPath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
-        const relativePath = rootFolder ? normalizedPath.replace(rootFolder, '') : normalizedPath;
-
+        const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
         try {
           const blob = await entry.getData(new BlobWriter());
-          let text = await blob.text();
-
-          // Нормализуем текст при извлечении
-          text = text
-            .replace(/\r\n/g, '\n')
-            .replace(/\r/g, '\n')
-            .replace(/\ufeff/g, '')
-            .replace(/\s+$/, ''); // убираем пробелы в конце строк
-
+          const text = await blob.text();
           files[relativePath] = text;
         } catch (err) {
-          console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
           files[relativePath] = null;
         }
       }
@@ -158,7 +136,7 @@ export default async function handler(req, res) {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           headers: { 'User-Agent': 'CBR-Checker/1.0' },
-          timeout: 30000,
+          timeout: 20000,
           maxContentLength: 15 * 1024 * 1024
         });
         console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
@@ -197,34 +175,20 @@ export default async function handler(req, res) {
         const oldLines = oldFiles[name].split('\n');
         const newLines = newFiles[name].split('\n');
         const diff = diffLines(oldLines, newLines);
-
-        // Исключаем "изменённые", если только пробелы поменялись
-        const hasRealChanges = diff.some(d => d.type !== 'same');
-        if (hasRealChanges) {
-          changes.push({ type: 'modified', file: name, diff });
-        }
+        changes.push({ type: 'modified', file: name, diff });
       }
     }
 
-    const summary = {
-      total_changes: changes.length,
-      added: changes.filter(c => c.type === 'added').length,
-      deleted: changes.filter(c => c.type === 'deleted').length,
-      modified: changes.filter(c => c.type === 'modified').length
-    };
-
-    // === ГЕНЕРАЦИЯ CSV (без строк "без изменений") ===
+    // === ГЕНЕРАЦИЯ CSV ===
     const jsonToCsv = (changes) => {
       const separator = ',';
       const header = ['type', 'file', 'change_type', 'line'].join(separator);
       const rows = changes.flatMap(item => {
         if (item.type === 'modified') {
-          return item.diff
-            .filter(d => d.type !== 'same')
-            .map(d => {
-              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
-              return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
-            });
+          return item.diff.map(d => {
+            const changeType = d.type === 'same' ? 'без изменений' : d.type;
+            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+          });
         } else {
           return [`"${item.type}","${item.file}","-","-"`];
         }
@@ -263,9 +227,14 @@ export default async function handler(req, res) {
 
     // === ОТВЕТ ===
     return res.status(200).json({
-      summary,
+      summary: {
+        total_changes: changes.length,
+        added: changes.filter(c => c.type === 'added').length,
+        deleted: changes.filter(c => c.type === 'deleted').length,
+        modified: changes.filter(c => c.type === 'modified').length
+      },
       report_url: gistUrl,
-      message: 'Готово. Только реальные изменения.'
+      message: 'Готово. Полный отчёт доступен по ссылке.'
     });
 
   } catch (error) {
