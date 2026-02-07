@@ -91,20 +91,29 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        // Удаляем ВСЕ вхождения папок вида "2024-01-01", "2025-02-02" и т.п.
-        let relativePath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+        // 🔍 ЛОГ: исходный путь
+        console.log('🔍 RAW:', entry.filename);
 
-        // Удаляем первую папку (например, "final_6_1_0_5/", "v2/", "release_2025/" и т.п.)
+        let relativePath = entry.filename;
+
+        // Удаляем все вхождения /2024-01-01/, /2025-02-02/ и т.п.
+        relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+        console.log('📅 После удаления дат:', relativePath);
+
+        // Удаляем первую папку (например, final_6_1_0_5/)
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
+        console.log('🗂️ После удаления корня:', relativePath);
 
-        // Убираем начальные слэши, если остались
+        // Убираем начальные слэши
         relativePath = relativePath.replace(/^\/+/, '');
+        console.log('✅ REL:', relativePath);
 
         try {
           const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
           files[relativePath] = text;
         } catch (err) {
+          console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
           files[relativePath] = null;
         }
       }
