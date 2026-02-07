@@ -8,7 +8,7 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// === УЛУЧШЕННАЯ НОРМАЛИЗАЦИЯ XSD-ЭЛЕМЕНТОВ ===
+// === НОРМАЛИЗАЦИЯ XSD-ЭЛЕМЕНТОВ (сортировка атрибутов) ===
 const normalizeXsdElement = (line) => {
   const match = line.trim().match(/<xsd:element\s+(.*?)\s*\/>/);
   if (!match) return line;
@@ -16,12 +16,10 @@ const normalizeXsdElement = (line) => {
   const attrsStr = match[1];
   const attrs = {};
 
-  // Извлекаем все атрибуты, включая с префиксами (model:fromDate и т.п.)
   attrsStr.replace(/(\w+:[\w-]+|[\w-]+)\s*=\s*"([^"]*)"/g, (_, key, value) => {
     attrs[key] = value;
   });
 
-  // Сортируем атрибуты по имени — гарантируем одинаковый порядок
   const sortedKeys = Object.keys(attrs).sort();
   const sortedAttrs = sortedKeys.map(key => `${key}="${attrs[key]}"`).join(' ');
 
@@ -32,13 +30,13 @@ const normalizeXsdElement = (line) => {
 const normalizeLine = (line) => {
   if (!line) return '';
 
-  // Убираем BOM, нормализуем переносы
-  line = line.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\ufeff/g, '').trim();
+  line = line
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\ufeff/g, '') // BOM
+    .replace(/\s+/g, ' ')   // много пробелов → один
+    .trim();
 
-  // Уменьшаем множественные пробелы до одного
-  line = line.replace(/\s+/g, ' ');
-
-  // Нормализуем XSD-элементы
   if (line.startsWith('<xsd:element') && line.endsWith('/>')) {
     return normalizeXsdElement(line);
   }
@@ -46,40 +44,47 @@ const normalizeLine = (line) => {
   return line;
 };
 
-// === СРАВНЕНИЕ СТРОК С ПОЛНОЙ НОРМАЛИЗАЦИЕЙ ===
+// === СРАВНЕНИЕ СТРОК БЕЗ УЧЁТА ПОРЯДКА ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
-  let i = 0, j = 0;
+  const processedOld = new Set();
+  const processedNew = new Set();
 
-  while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length) {
-      const oldLine = oldLines[i];
-      const newLine = newLines[j];
+  const oldNorm = oldLines
+    .map((line, i) => ({ line, norm: normalizeLine(line), index: i }))
+    .filter(item => item.norm); // исключаем пустые
 
-      const normOld = normalizeLine(oldLine);
-      const normNew = normalizeLine(newLine);
+  const newNorm = newLines
+    .map((line, i) => ({ line, norm: normalizeLine(line), index: i }))
+    .filter(item => item.norm);
 
-      if (normOld === normNew) {
-        result.push({ type: 'same', value: oldLines[i] });
-        i++;
-        j++;
-        continue;
-      }
-    }
+  // 1. Найдём все совпадения
+  for (const oldItem of oldNorm) {
+    if (processedOld.has(oldItem.index)) continue;
 
-    if (j < newLines.length) {
-      result.push({ type: 'added', value: newLines[j] });
-      j++;
+    const match = newNorm.find(n => !processedNew.has(n.index) && n.norm === oldItem.norm);
+    if (match) {
+      result.push({ type: 'same', value: oldItem.line });
+      processedOld.add(oldItem.index);
+      processedNew.add(match.index);
     } else {
-      result.push({ type: 'removed', value: oldLines[i] });
-      i++;
+      result.push({ type: 'removed', value: oldItem.line });
+      processedOld.add(oldItem.index);
+    }
+  }
+
+  // 2. Добавим оставшиеся новые строки
+  for (const newItem of newNorm) {
+    if (!processedNew.has(newItem.index)) {
+      result.push({ type: 'added', value: newItem.line });
+      processedNew.add(newItem.index);
     }
   }
 
   return result;
 };
 
-// === ИЗВЛЕЧЕНИЕ ФАЙЛОВ С НОРМАЛИЗАЦИЕЙ ТЕКСТА ===
+// === ИЗВЛЕЧЕНИЕ ТЕКСТОВЫХ ФАЙЛОВ ИЗ ZIP ===
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
@@ -108,12 +113,12 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
           const blob = await entry.getData(new BlobWriter());
           let text = await blob.text();
 
-          // === КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: нормализуем весь текст до сохранения ===
+          // Нормализуем текст при извлечении
           text = text
-            .replace(/\r\n/g, '\n')  // CRLF → LF
-            .replace(/\r/g, '\n')     // CR → LF
-            .replace(/\ufeff/g, '')   // Убираем BOM
-            .replace(/\s+$/, '');     // Убираем пробелы в конце строк
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/\ufeff/g, '')
+            .replace(/\s+$/, ''); // убираем пробелы в конце строк
 
           files[relativePath] = text;
         } catch (err) {
@@ -191,7 +196,7 @@ export default async function handler(req, res) {
         const newLines = newFiles[name].split('\n');
         const diff = diffLines(oldLines, newLines);
 
-        // Фильтруем, чтобы не добавлять "modified", если только пробелы поменялись
+        // Исключаем "изменённые", если только пробелы поменялись
         const hasRealChanges = diff.some(d => d.type !== 'same');
         if (hasRealChanges) {
           changes.push({ type: 'modified', file: name, diff });
@@ -206,7 +211,7 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
-    // === ГЕНЕРАЦИЯ CSV ===
+    // === ГЕНЕРАЦИЯ CSV (без строк "без изменений") ===
     const jsonToCsv = (changes) => {
       const separator = ',';
       const header = ['type', 'file', 'change_type', 'line'].join(separator);
