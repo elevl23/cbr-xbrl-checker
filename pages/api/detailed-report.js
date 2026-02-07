@@ -232,4 +232,40 @@ export default async function handler(req, res) {
 
     if (!GIST_TOKEN) {
       return res.status(500).json({
-    
+        error: 'GITHUB_GIST_TOKEN не настроен',
+        message: 'Не удалось создать отчёт. Обратитесь к администратору.'
+      });
+    }
+
+    const gistResponse = await axios.post('https://api.github.com/gists', {
+      description: 'CBR XBRL-CSV Diff Report',
+      public: true,
+      files: {
+        'xbrl-changes.csv': {
+          content: csv
+        }
+      }
+    }, {
+      headers: {
+        'Authorization': `Bearer ${GIST_TOKEN}`,
+        'User-Agent': 'cbr-xbrl-checker'
+      }
+    });
+
+    const gistUrl = gistResponse.data.html_url;
+
+    // === ОТВЕТ ===
+    return res.status(200).json({
+      summary,
+      report_url: gistUrl,
+      message: 'Готово. Только реальные изменения.'
+    });
+
+  } catch (error) {
+    console.error('💥 Ошибка при генерации детального отчёта:', error.message);
+    return res.status(500).json({
+      error: 'Не удалось создать отчёт',
+      message: error.message
+    });
+  }
+}
