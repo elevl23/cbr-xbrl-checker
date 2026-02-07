@@ -8,38 +8,61 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// Нормализация XSD-элементов
+// === УЛУЧШЕННАЯ НОРМАЛИЗАЦИЯ XSD-ЭЛЕМЕНТОВ ===
 const normalizeXsdElement = (line) => {
-  const match = line.match(/<xsd:element\s+(.*?)\s*\/>/);
+  const match = line.trim().match(/<xsd:element\s+(.*?)\s*\/>/);
   if (!match) return line;
 
   const attrsStr = match[1];
   const attrs = {};
 
+  // Извлекаем все атрибуты, включая с префиксами (model:fromDate и т.п.)
   attrsStr.replace(/(\w+:[\w-]+|[\w-]+)\s*=\s*"([^"]*)"/g, (_, key, value) => {
     attrs[key] = value;
   });
 
+  // Сортируем атрибуты по имени — гарантируем одинаковый порядок
   const sortedKeys = Object.keys(attrs).sort();
   const sortedAttrs = sortedKeys.map(key => `${key}="${attrs[key]}"`).join(' ');
 
   return `<xsd:element ${sortedAttrs}/>`;
 };
 
+// === УНИВЕРСАЛЬНАЯ НОРМАЛИЗАЦИЯ СТРОКИ ===
+const normalizeLine = (line) => {
+  if (!line) return '';
+
+  // Убираем BOM, нормализуем переносы
+  line = line.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\ufeff/g, '').trim();
+
+  // Уменьшаем множественные пробелы до одного
+  line = line.replace(/\s+/g, ' ');
+
+  // Нормализуем XSD-элементы
+  if (line.startsWith('<xsd:element') && line.endsWith('/>')) {
+    return normalizeXsdElement(line);
+  }
+
+  return line;
+};
+
+// === СРАВНЕНИЕ СТРОК С ПОЛНОЙ НОРМАЛИЗАЦИЕЙ ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
+
   while (i < oldLines.length || j < newLines.length) {
     if (i < oldLines.length && j < newLines.length) {
-      const oldLine = oldLines[i].trim();
-      const newLine = newLines[j].trim();
+      const oldLine = oldLines[i];
+      const newLine = newLines[j];
 
-      const normOld = oldLine.includes('<xsd:element') ? normalizeXsdElement(oldLine) : oldLine;
-      const normNew = newLine.includes('<xsd:element') ? normalizeXsdElement(newLine) : newLine;
+      const normOld = normalizeLine(oldLine);
+      const normNew = normalizeLine(newLine);
 
       if (normOld === normNew) {
         result.push({ type: 'same', value: oldLines[i] });
-        i++; j++;
+        i++;
+        j++;
         continue;
       }
     }
@@ -52,9 +75,11 @@ const diffLines = (oldLines, newLines) => {
       i++;
     }
   }
+
   return result;
 };
 
+// === ИЗВЛЕЧЕНИЕ ФАЙЛОВ С НОРМАЛИЗАЦИЕЙ ТЕКСТА ===
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
@@ -81,9 +106,18 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
         try {
           const blob = await entry.getData(new BlobWriter());
-          const text = await blob.text();
+          let text = await blob.text();
+
+          // === КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: нормализуем весь текст до сохранения ===
+          text = text
+            .replace(/\r\n/g, '\n')  // CRLF → LF
+            .replace(/\r/g, '\n')     // CR → LF
+            .replace(/\ufeff/g, '')   // Убираем BOM
+            .replace(/\s+$/, '');     // Убираем пробелы в конце строк
+
           files[relativePath] = text;
         } catch (err) {
+          console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
           files[relativePath] = null;
         }
       }
@@ -97,6 +131,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
   }
 };
 
+// === ОСНОВНОЙ ОБРАБОТЧИК ===
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Метод не поддерживается' });
@@ -135,24 +170,32 @@ export default async function handler(req, res) {
 
     const changes = [];
 
+    // Удалённые файлы
     for (const name of Object.keys(oldFiles)) {
       if (!newFiles[name]) {
         changes.push({ type: 'deleted', file: name });
       }
     }
 
+    // Новые файлы
     for (const name of Object.keys(newFiles)) {
       if (!oldFiles[name]) {
         changes.push({ type: 'added', file: name });
       }
     }
 
+    // Изменённые файлы
     for (const name of Object.keys(newFiles)) {
       if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
         const oldLines = oldFiles[name].split('\n');
         const newLines = newFiles[name].split('\n');
         const diff = diffLines(oldLines, newLines);
-        changes.push({ type: 'modified', file: name, diff });
+
+        // Фильтруем, чтобы не добавлять "modified", если только пробелы поменялись
+        const hasRealChanges = diff.some(d => d.type !== 'same');
+        if (hasRealChanges) {
+          changes.push({ type: 'modified', file: name, diff });
+        }
       }
     }
 
@@ -163,7 +206,7 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
-    // === ГЕНЕРАЦИЯ CSV — БЕЗ СТРОК "БЕЗ ИЗМЕНЕНИЙ" ===
+    // === ГЕНЕРАЦИЯ CSV ===
     const jsonToCsv = (changes) => {
       const separator = ',';
       const header = ['type', 'file', 'change_type', 'line'].join(separator);
@@ -189,40 +232,4 @@ export default async function handler(req, res) {
 
     if (!GIST_TOKEN) {
       return res.status(500).json({
-        error: 'GITHUB_GIST_TOKEN не настроен',
-        message: 'Не удалось создать отчёт. Обратитесь к администратору.'
-      });
-    }
-
-    const gistResponse = await axios.post('https://api.github.com/gists', {
-      description: 'CBR XBRL-CSV Diff Report',
-      public: true,
-      files: {
-        'xbrl-changes.csv': {
-          content: csv
-        }
-      }
-    }, {
-      headers: {
-        'Authorization': `Bearer ${GIST_TOKEN}`,
-        'User-Agent': 'cbr-xbrl-checker'
-      }
-    });
-
-    const gistUrl = gistResponse.data.html_url;
-
-    // === ОТВЕТ ===
-    return res.status(200).json({
-      summary,
-      report_url: gistUrl,
-      message: 'Готово. Только реальные изменения.'
-    });
-
-  } catch (error) {
-    console.error('💥 Ошибка при генерации детального отчёта:', error.message);
-    return res.status(500).json({
-      error: 'Не удалось создать отчёт',
-      message: error.message
-    });
-  }
-}
+    
