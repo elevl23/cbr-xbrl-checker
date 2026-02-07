@@ -77,34 +77,37 @@ const diffLines = (oldLines, newLines) => {
 // === ИЗВЛЕЧЕНИЕ ТЕКСТОВЫХ ФАЙЛОВ ИЗ ZIP ===
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
+    console.log('✅ НАЧАЛО extractAllTextFiles'); // ← ДОБАВЬ ЭТО
+
     const { ZipReader, BlobReader, BlobWriter } = await import('@zip.js/zip.js');
+    console.log('✅ ZIP.JS ЗАГРУЖЕН'); // ← И ЭТО
+
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
 
     if (entries.length === 0) {
       await reader.close();
+      console.log('❌ Архив пуст');
       return {};
     }
+
+    console.log(`✅ Архив содержит ${entries.length} записей`); // ← И ЭТО
 
     const files = {};
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        // 🔍 ЛОГ: исходный путь
-        console.log('🔍 RAW:', entry.filename);
+        console.log('🔍 RAW:', entry.filename); // ← УЖЕ ЕСТЬ
 
         let relativePath = entry.filename;
 
-        // Удаляем все вхождения /2024-01-01/, /2025-02-02/ и т.п.
         relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
         console.log('📅 После удаления дат:', relativePath);
 
-        // Удаляем первую папку (например, final_6_1_0_5/)
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
         console.log('🗂️ После удаления корня:', relativePath);
 
-        // Убираем начальные слэши
         relativePath = relativePath.replace(/^\/+/, '');
         console.log('✅ REL:', relativePath);
 
