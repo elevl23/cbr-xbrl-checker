@@ -91,13 +91,10 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        let relativePath = entry.filename;
+        // Удаляем ВСЕ вхождения папок вида "2024-01-01", "2025-02-02" и т.п.
+        let relativePath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
 
-        // Удаляем папку вида "2024-01-01/", "2025-02-02/" и т.п.
-        relativePath = relativePath.replace(/^(\d{4}-\d{2}-\d{2})\//, '');
-
-        // Удаляем папку вида "final_6_1_0_5/", "final_6_1_0_7/" и т.п.
-        // Удаляем первую папку, если она похожа на версию (например, содержит "final", "v", или просто цифры)
+        // Удаляем первую папку (например, "final_6_1_0_5/", "v2/", "release_2025/" и т.п.)
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
 
         // Убираем начальные слэши, если остались
