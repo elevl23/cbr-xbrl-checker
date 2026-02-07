@@ -77,14 +77,15 @@ const diffLines = (oldLines, newLines) => {
 // === ИЗВЛЕЧЕНИЕ ТЕКСТОВЫХ ФАЙЛОВ ИЗ ZIP ===
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
-    console.log('✅ НАЧАЛО extractAllTextFiles'); // ← ДОБАВЬ ЭТО
+    console.log('✅ НАЧАЛО обработки:', label);
+    console.log('✅ Размер архива:', arrayBuffer.byteLength);
 
     const { ZipReader, BlobReader, BlobWriter } = await import('@zip.js/zip.js');
-    console.log('✅ ZIP.JS ЗАГРУЖЕН'); // ← И ЭТО
-
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
+
+    console.log('✅ Архив содержит записей:', entries.length);
 
     if (entries.length === 0) {
       await reader.close();
@@ -92,22 +93,23 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       return {};
     }
 
-    console.log(`✅ Архив содержит ${entries.length} записей`); // ← И ЭТО
-
     const files = {};
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        console.log('🔍 RAW:', entry.filename); // ← УЖЕ ЕСТЬ
+        console.log('🔍 RAW:', entry.filename);
 
         let relativePath = entry.filename;
 
+        // Удаляем папки с датами
         relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
-        console.log('📅 После удаления дат:', relativePath);
+        console.log('📅 После дат:', relativePath);
 
+        // Удаляем корневую папку
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
-        console.log('🗂️ После удаления корня:', relativePath);
+        console.log('🗂️ После корня:', relativePath);
 
+        // Убираем начальные слэши
         relativePath = relativePath.replace(/^\/+/, '');
         console.log('✅ REL:', relativePath);
 
@@ -123,6 +125,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     }
 
     await reader.close();
+    console.log('✅ Извлечено файлов:', Object.keys(files).length);
     return files;
   } catch (err) {
     console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
