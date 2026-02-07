@@ -47,37 +47,39 @@ const normalizeLine = (line) => {
 // === СРАВНЕНИЕ СТРОК БЕЗ УЧЁТА ПОРЯДКА ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
-  const processedOld = new Set();
   const processedNew = new Set();
 
   const oldNorm = oldLines
     .map((line, i) => ({ line, norm: normalizeLine(line), index: i }))
-    .filter(item => item.norm); // исключаем пустые
+    .filter(item => item.norm);
 
   const newNorm = newLines
     .map((line, i) => ({ line, norm: normalizeLine(line), index: i }))
     .filter(item => item.norm);
 
-  // 1. Найдём все совпадения
-  for (const oldItem of oldNorm) {
-    if (processedOld.has(oldItem.index)) continue;
+  const newNormMap = new Map();
+  for (const item of newNorm) {
+    if (!newNormMap.has(item.norm)) {
+      newNormMap.set(item.norm, []);
+    }
+    newNormMap.get(item.norm).push(item);
+  }
 
-    const match = newNorm.find(n => !processedNew.has(n.index) && n.norm === oldItem.norm);
+  for (const oldItem of oldNorm) {
+    const matches = newNormMap.get(oldItem.norm);
+    const match = matches?.find(n => !processedNew.has(n.index)) || null;
+
     if (match) {
       result.push({ type: 'same', value: oldItem.line });
-      processedOld.add(oldItem.index);
       processedNew.add(match.index);
     } else {
       result.push({ type: 'removed', value: oldItem.line });
-      processedOld.add(oldItem.index);
     }
   }
 
-  // 2. Добавим оставшиеся новые строки
   for (const newItem of newNorm) {
     if (!processedNew.has(newItem.index)) {
       result.push({ type: 'added', value: newItem.line });
-      processedNew.add(newItem.index);
     }
   }
 
