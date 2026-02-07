@@ -87,17 +87,22 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       return {};
     }
 
-    let rootFolder = '';
-    const firstSlash = entries[0].filename.indexOf('/');
-    if (firstSlash > 0) {
-      rootFolder = entries[0].filename.substring(0, firstSlash) + '/';
-    }
-
     const files = {};
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
+        let relativePath = entry.filename;
+
+        // Удаляем папку вида "2024-01-01/", "2025-02-02/" и т.п.
+        relativePath = relativePath.replace(/^(\d{4}-\d{2}-\d{2})\//, '');
+
+        // Удаляем папку вида "final_6_1_0_5/", "final_6_1_0_7/" и т.п.
+        // Удаляем первую папку, если она похожа на версию (например, содержит "final", "v", или просто цифры)
+        relativePath = relativePath.replace(/^[^\/]+\/?/, '');
+
+        // Убираем начальные слэши, если остались
+        relativePath = relativePath.replace(/^\/+/, '');
+
         try {
           const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
