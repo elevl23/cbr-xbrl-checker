@@ -237,33 +237,50 @@ export default async function handler(req, res) {
     const changes = [];
 
     // Удалённые файлы
-    for (const name of Object.keys(oldFiles)) {
-      if (!newFiles[name]) {
-        changes.push({ type: 'deleted', file: name });
-      }
-    }
+    // --- Защита от undefined ---
+if (!oldFiles || !newFiles) {
+  console.error('❌ oldFiles или newFiles — undefined', { oldFiles, newFiles });
+  return res.status(500).json({
+    error: 'Ошибка при извлечении файлов',
+    message: 'Один из архивов не был распакован'
+  });
+}
 
-    // Новые файлы
-    for (const name of Object.keys(newFiles)) {
-      if (!oldFiles[name]) {
-        changes.push({ type: 'added', file: name });
-      }
-    }
+const changes = [];
 
-    // Изменённые файлы
-    for (const name of Object.keys(newFiles)) {
-      if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
-        const oldLines = oldFiles[name].split('\n');
-        const newLines = newFiles[name].split('\n');
-        const diff = diffLines(oldLines, newLines);
+// Удалённые файлы
+for (const name of Object.keys(oldFiles)) {
+  if (!newFiles[name]) {
+    changes.push({ type: 'deleted', file: name });
+  }
+}
 
-        // Оставляем только added/removed
-        const realChanges = diff.filter(d => d.type !== 'same');
-        if (realChanges.length > 0) {
-          changes.push({ type: 'modified', file: name, diff: realChanges });
-        }
-      }
+// Новые файлы
+for (const name of Object.keys(newFiles)) {
+  if (!oldFiles[name]) {
+    changes.push({ type: 'added', file: name });
+  }
+}
+
+// Изменённые файлы
+for (const name of Object.keys(newFiles)) {
+  if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
+    // Защита от undefined
+    const oldText = oldFiles[name] || '';
+    const newText = newFiles[name] || '';
+
+    const oldLines = oldText.split('\n');
+    const newLines = newText.split('\n');
+
+    const diff = diffLines(oldLines, newLines);
+
+    // Оставляем только добавленные/удалённые строки
+    const realChanges = diff.filter(d => d.type !== 'same');
+    if (realChanges.length > 0) {
+      changes.push({ type: 'modified', file: name, diff: realChanges });
     }
+  }
+}
 
     // === ГЕНЕРАЦИЯ CSV С ТЕХНИЧЕСКИМИ ПОЛЯМИ ===
     const jsonToCsv = (changes) => {
