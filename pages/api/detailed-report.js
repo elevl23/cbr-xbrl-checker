@@ -19,10 +19,9 @@ const normalizeLine = (line) => {
     .trim();
 };
 
-// === АНАЛИЗ СТРОКИ (для CSV) ===
+// === АНАЛИЗ СТРОКИ (для отладки) ===
 const analyzeLine = (line) => {
   if (!line) return {};
-
   return {
     length: line.length,
     has_crlf: line.includes('\r'),
@@ -52,7 +51,7 @@ const diffLines = (oldLines, newLines) => {
 
     let foundMatch = false;
 
-    // === Ищем вперёд: возможно, строки добавлены (вставка) ===
+    // Ищем вперёд: возможно, строки добавлены (вставка)
     const currentOldLine = oldLines[i]?.trim();
     if (currentOldLine) {
       for (let k = 1; k <= MAX_LOOKAHEAD && j + k < newLines.length; k++) {
@@ -70,7 +69,7 @@ const diffLines = (oldLines, newLines) => {
 
     if (foundMatch) continue;
 
-    // === Ищем вперёд: возможно, строки удалены (удаление блока) ===
+    // Ищем вперёд: возможно, строки удалены (удаление блока)
     const currentNewLine = newLines[j]?.trim();
     if (currentNewLine) {
       for (let k = 1; k <= MAX_LOOKAHEAD && i + k < oldLines.length; k++) {
@@ -88,7 +87,7 @@ const diffLines = (oldLines, newLines) => {
 
     if (foundMatch) continue;
 
-    // === Стандартное поведение ===
+    // Стандартное поведение
     if (j < newLines.length) {
       result.push({ type: 'added', value: newLines[j], index: j });
       j++;
@@ -105,6 +104,7 @@ const diffLines = (oldLines, newLines) => {
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
     console.log(`🔍 Начало обработки: ${label}, размер: ${arrayBuffer.byteLength}`);
+
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
@@ -114,62 +114,37 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       return {};
     }
 
-    console.log(`✅ Архив содержит ${entries.length} записей`);
     const files = {};
 
     for (const entry of entries) {
-      console.log('📌 Обработка записи:', entry);
-
-      if (!entry) {
-        console.warn('❌ entry === undefined');
+      if (!entry || !entry.filename || !entry.filename.trim()) {
+        console.warn('⚠️ Пропущена запись без имени', entry);
         continue;
       }
 
-      if (!entry.filename) {
-        console.warn('❌ entry.filename === undefined');
-        continue;
-      }
+      if (entry.directory) continue;
 
-      if (entry.directory) {
-        console.log('🗂️ Папка — пропускаем:', entry.filename);
-        continue;
-      }
-
-      if (!isTextFile(entry.filename)) {
-        console.log('📄 Не текстовый файл — пропускаем:', entry.filename);
-        continue;
-      }
+      if (!isTextFile(entry.filename)) continue;
 
       let relativePath = entry.filename;
-      console.log('📄 Текстовый файл:', entry.filename);
 
       try {
-        console.log('1. До /2024-01-01/:', relativePath);
+        // Удаляем папки вида /2024-01-01/, /2025-07-04/
         relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
-        console.log('2. После даты:', relativePath);
 
+        // Удаляем первую папку (например, final_6_1_0_5/)
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
-        console.log('3. После корня:', relativePath);
 
+        // Убираем начальные слэши
         relativePath = relativePath.replace(/^\/+/, '');
-        console.log('4. После слэшей:', relativePath);
 
-        if (!relativePath) {
-          console.error('❌ relativePath пуст');
-          continue;
-        }
-      } catch (err) {
-        console.error('❌ Ошибка при обработке пути:', entry.filename, err.message);
-        continue;
-      }
+        if (!relativePath) throw new Error('relativePath пуст');
 
-      try {
         const blob = await entry.getData(new BlobWriter());
         const text = await blob.text();
         files[relativePath] = text;
-        console.log('✅ Успешно извлечено:', relativePath);
       } catch (err) {
-        console.error('❌ Ошибка чтения:', entry.filename, err.message);
+        console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
         files[relativePath] = null;
       }
     }
@@ -178,7 +153,6 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     return files;
   } catch (err) {
     console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
-    console.error('❌ Стек:', err.stack);
     return {};
   }
 };
@@ -234,53 +208,48 @@ export default async function handler(req, res) {
     const oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
     const newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
 
+    // --- Защита от undefined ---
+    if (!oldFiles || !newFiles) {
+      console.error('❌ oldFiles или newFiles — undefined', { oldFiles, newFiles });
+      return res.status(500).json({
+        error: 'Ошибка при извлечении файлов',
+        message: 'Один из архивов не был распакован'
+      });
+    }
+
     const changes = [];
 
     // Удалённые файлы
-    // --- Защита от undefined ---
-if (!oldFiles || !newFiles) {
-  console.error('❌ oldFiles или newFiles — undefined', { oldFiles, newFiles });
-  return res.status(500).json({
-    error: 'Ошибка при извлечении файлов',
-    message: 'Один из архивов не был распакован'
-  });
-}
-
-const changes = [];
-
-// Удалённые файлы
-for (const name of Object.keys(oldFiles)) {
-  if (!newFiles[name]) {
-    changes.push({ type: 'deleted', file: name });
-  }
-}
-
-// Новые файлы
-for (const name of Object.keys(newFiles)) {
-  if (!oldFiles[name]) {
-    changes.push({ type: 'added', file: name });
-  }
-}
-
-// Изменённые файлы
-for (const name of Object.keys(newFiles)) {
-  if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
-    // Защита от undefined
-    const oldText = oldFiles[name] || '';
-    const newText = newFiles[name] || '';
-
-    const oldLines = oldText.split('\n');
-    const newLines = newText.split('\n');
-
-    const diff = diffLines(oldLines, newLines);
-
-    // Оставляем только добавленные/удалённые строки
-    const realChanges = diff.filter(d => d.type !== 'same');
-    if (realChanges.length > 0) {
-      changes.push({ type: 'modified', file: name, diff: realChanges });
+    for (const name of Object.keys(oldFiles)) {
+      if (!newFiles[name]) {
+        changes.push({ type: 'deleted', file: name });
+      }
     }
-  }
-}
+
+    // Новые файлы
+    for (const name of Object.keys(newFiles)) {
+      if (!oldFiles[name]) {
+        changes.push({ type: 'added', file: name });
+      }
+    }
+
+    // Изменённые файлы
+    for (const name of Object.keys(newFiles)) {
+      if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
+        const oldText = oldFiles[name] || '';
+        const newText = newFiles[name] || '';
+
+        const oldLines = oldText.split('\n');
+        const newLines = newText.split('\n');
+        const diff = diffLines(oldLines, newLines);
+
+        // Оставляем только added/removed
+        const realChanges = diff.filter(d => d.type !== 'same');
+        if (realChanges.length > 0) {
+          changes.push({ type: 'modified', file: name, diff: realChanges });
+        }
+      }
+    }
 
     // === ГЕНЕРАЦИЯ CSV С ТЕХНИЧЕСКИМИ ПОЛЯМИ ===
     const jsonToCsv = (changes) => {
