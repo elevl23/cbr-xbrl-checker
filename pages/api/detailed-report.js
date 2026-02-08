@@ -116,9 +116,26 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     const files = {};
 
     for (const entry of entries) {
-      if (!entry.directory && isTextFile(entry.filename)) {
-        // Удаляем папки вида /2024-01-01/, /2025-07-04/
-        let relativePath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+      // Защита от битых записей
+      if (!entry) {
+        console.warn('⚠️ Пропущена: entry === undefined');
+        continue;
+      }
+
+      if (!entry.filename || !entry.filename.trim()) {
+        console.warn('⚠️ Пропущена: нет имени файла', entry);
+        continue;
+      }
+
+      if (entry.directory) continue;
+
+      if (!isTextFile(entry.filename)) continue;
+
+      let relativePath = entry.filename;
+
+      try {
+        // Удаляем папки вида /2024-01-01/
+        relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
 
         // Удаляем первую папку (например, final_6_1_0_5/)
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
@@ -126,14 +143,21 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
         // Убираем начальные слэши
         relativePath = relativePath.replace(/^\/+/, '');
 
-        try {
-          const blob = await entry.getData(new BlobWriter());
-          const text = await blob.text();
-          files[relativePath] = text;
-        } catch (err) {
-          console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
-          files[relativePath] = null;
+        if (!relativePath) {
+          throw new Error('relativePath пуст после нормализации');
         }
+      } catch (err) {
+        console.error('❌ Ошибка при нормализации пути:', entry.filename, err.message);
+        continue;
+      }
+
+      try {
+        const blob = await entry.getData(new BlobWriter());
+        const text = await blob.text();
+        files[relativePath] = text;
+      } catch (err) {
+        console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
+        files[relativePath] = null;
       }
     }
 
