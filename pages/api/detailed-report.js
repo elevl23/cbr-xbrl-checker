@@ -8,29 +8,58 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// === УЛУЧШЕННОЕ СРАВНЕНИЕ СТРОК С ПЕРЕСИНХРОНИЗАЦИЕЙ ===
+// === НОРМАЛИЗАЦИЯ СТРОКИ ===
+const normalizeLine = (line) => {
+  if (!line) return '';
+  return line
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\ufeff/g, '') // BOM
+    .replace(/\s+/g, ' ')   // множественные пробелы → один
+    .trim();
+};
+
+// === АНАЛИЗ СТРОКИ (для CSV) ===
+const analyzeLine = (line) => {
+  if (!line) return {};
+
+  return {
+    length: line.length,
+    has_crlf: line.includes('\r'),
+    has_bom: line.includes('\ufeff'),
+    whitespace_count: (line.match(/\s/g) || []).length,
+    normalized: normalizeLine(line)
+  };
+};
+
+// === УЛУЧШЕННОЕ СРАВНЕНИЕ СТРОК С ПЕРЕСИНХРОНИЗАЦИЕЙ И ИНДЕКСАМИ ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
-  const MAX_LOOKAHEAD = 30;
+  const MAX_LOOKAHEAD = 50; // Увеличили на случай больших сдвигов
 
   while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-      result.push({ type: 'same', value: oldLines[i] });
-      i++; j++;
-      continue;
+    if (i < oldLines.length && j < newLines.length) {
+      const oldLine = oldLines[i];
+      const newLine = newLines[j];
+
+      if (normalizeLine(oldLine) === normalizeLine(newLine)) {
+        result.push({ type: 'same', value: oldLine, index: i });
+        i++; j++;
+        continue;
+      }
     }
 
     let foundMatch = false;
 
-    // Ищем вперёд: возможно, строки добавлены
+    // === Ищем вперёд: возможно, строки добавлены (вставка) ===
     const currentOldLine = oldLines[i]?.trim();
     if (currentOldLine) {
       for (let k = 1; k <= MAX_LOOKAHEAD && j + k < newLines.length; k++) {
         if (newLines[j + k].trim() === currentOldLine) {
           const target = j + k;
           while (j < target) {
-            result.push({ type: 'added', value: newLines[j] });
+            result.push({ type: 'added', value: newLines[j], index: j });
             j++;
           }
           foundMatch = true;
@@ -41,14 +70,14 @@ const diffLines = (oldLines, newLines) => {
 
     if (foundMatch) continue;
 
-    // Ищем вперёд: возможно, строки удалены
+    // === Ищем вперёд: возможно, строки удалены (удаление блока) ===
     const currentNewLine = newLines[j]?.trim();
     if (currentNewLine) {
       for (let k = 1; k <= MAX_LOOKAHEAD && i + k < oldLines.length; k++) {
         if (oldLines[i + k].trim() === currentNewLine) {
           const target = i + k;
           while (i < target) {
-            result.push({ type: 'removed', value: oldLines[i] });
+            result.push({ type: 'removed', value: oldLines[i], index: i });
             i++;
           }
           foundMatch = true;
@@ -59,12 +88,12 @@ const diffLines = (oldLines, newLines) => {
 
     if (foundMatch) continue;
 
-    // Стандартное поведение
+    // === Стандартное поведение ===
     if (j < newLines.length) {
-      result.push({ type: 'added', value: newLines[j] });
+      result.push({ type: 'added', value: newLines[j], index: j });
       j++;
     } else if (i < oldLines.length) {
-      result.push({ type: 'removed', value: oldLines[i] });
+      result.push({ type: 'removed', value: oldLines[i], index: i });
       i++;
     }
   }
@@ -84,23 +113,25 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       return {};
     }
 
-    let rootFolder = '';
-    const firstSlash = entries[0].filename.indexOf('/');
-    if (firstSlash > 0) {
-      rootFolder = entries[0].filename.substring(0, firstSlash) + '/';
-    }
-
     const files = {};
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
+        // Удаляем папки вида /2024-01-01/, /2025-07-04/
+        let relativePath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+
+        // Удаляем первую папку (например, final_6_1_0_5/)
+        relativePath = relativePath.replace(/^[^\/]+\/?/, '');
+
+        // Убираем начальные слэши
+        relativePath = relativePath.replace(/^\/+/, '');
+
         try {
           const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
           files[relativePath] = text;
         } catch (err) {
-          console.error(`❌ Ошибка чтения файла ${entry.filename}:`, err.message);
+          console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
           files[relativePath] = null;
         }
       }
@@ -109,7 +140,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     await reader.close();
     return files;
   } catch (err) {
-    console.error(`❌ Ошибка извлечения из ${label}:`, err.message);
+    console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
     return {};
   }
 };
@@ -125,13 +156,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Защита от пустого body
     if (!req.body) {
-      console.log('❌ req.body отсутствует');
       return res.status(400).json({ error: 'Тело запроса отсутствует' });
     }
 
-    // Dify может обернуть: { body: { old_url, new_url } }
+    // Dify может обернуть тело
     let payload = req.body;
     if (payload.body && typeof payload.body === 'object') {
       payload = payload.body;
@@ -140,7 +169,6 @@ export default async function handler(req, res) {
     const { old_url, new_url } = payload;
 
     if (!old_url || !new_url) {
-      console.log('❌ Не хватает old_url или new_url');
       return res.status(400).json({ error: 'Не хватает old_url или new_url' });
     }
 
@@ -190,34 +218,72 @@ export default async function handler(req, res) {
         const oldLines = oldFiles[name].split('\n');
         const newLines = newFiles[name].split('\n');
         const diff = diffLines(oldLines, newLines);
-        changes.push({ type: 'modified', file: name, diff });
+
+        // Оставляем только added/removed
+        const realChanges = diff.filter(d => d.type !== 'same');
+        if (realChanges.length > 0) {
+          changes.push({ type: 'modified', file: name, diff: realChanges });
+        }
       }
     }
 
-    // Генерация CSV
+    // === ГЕНЕРАЦИЯ CSV С ТЕХНИЧЕСКИМИ ПОЛЯМИ ===
     const jsonToCsv = (changes) => {
       const separator = ',';
-      const header = ['type', 'file', 'change_type', 'line'].join(separator);
+      const header = [
+        'type',
+        'file',
+        'change_type',
+        'line',
+        'old_index',
+        'new_index',
+        'length',
+        'has_crlf',
+        'has_bom',
+        'whitespace_count',
+        'normalized'
+      ].join(separator);
+
       const rows = changes.flatMap(item => {
         if (item.type === 'modified') {
           return item.diff.map(d => {
-            const changeType = d.type === 'same' ? 'без изменений' : d.type;
-            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+            const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+            const analysis = analyzeLine(d.value);
+
+            return [
+              `"${item.type}"`,
+              `"${item.file}"`,
+              `"${changeType}"`,
+              `"${d.value.replace(/"/g, '""')}"`,
+              d.type === 'removed' ? d.index : '',
+              d.type === 'added' ? d.index : '',
+              analysis.length,
+              analysis.has_crlf ? 'да' : 'нет',
+              analysis.has_bom ? 'да' : 'нет',
+              analysis.whitespace_count,
+              `"${analysis.normalized.replace(/"/g, '""')}"`
+            ].join(separator);
           });
         } else {
-          return [`"${item.type}","${item.file}","-","-"`];
+          return [
+            `"${item.type}"`,
+            `"${item.file}"`,
+            '"-"',
+            '"-"',
+            '""', '""', '""', '""', '""', '""', '""'
+          ].join(separator);
         }
       });
+
       return [header, ...rows].join('\n');
     };
 
     const csv = jsonToCsv(changes);
 
-    // Отправка в Gist
+    // === ОТПРАВКА В GITHUB GIST ===
     const GIST_TOKEN = process.env.GITHUB_GIST_TOKEN;
 
     if (!GIST_TOKEN) {
-      console.log('❌ GITHUB_GIST_TOKEN не настроен');
       return res.status(500).json({
         error: 'GITHUB_GIST_TOKEN не настроен',
         message: 'Обратитесь к администратору.'
@@ -225,7 +291,7 @@ export default async function handler(req, res) {
     }
 
     const gistResponse = await axios.post('https://api.github.com/gists', {
-      description: 'CBR XBRL-CSV Diff Report',
+      description: 'CBR XBRL-CSV Diff Report (with debug info)',
       public: true,
       files: {
         'xbrl-changes.csv': { content: csv }
@@ -239,7 +305,7 @@ export default async function handler(req, res) {
 
     const gistUrl = gistResponse.data.html_url;
 
-    // Ответ
+    // === ОТВЕТ ===
     return res.status(200).json({
       summary: {
         total_changes: changes.length,
@@ -248,14 +314,14 @@ export default async function handler(req, res) {
         modified: changes.filter(c => c.type === 'modified').length
       },
       report_url: gistUrl,
-      message: 'Готово. Полный отчёт доступен по ссылке.'
+      message: 'Готово. Отчёт содержит технические данные для отладки.'
     });
 
   } catch (error) {
-    console.error('💥 Ошибка:', error.message);
+    console.error('💥 Ошибка при генерации отчёта:', error.message);
     return res.status(500).json({
       error: 'Не удалось создать отчёт',
       message: error.message
     });
   }
-}
+};
