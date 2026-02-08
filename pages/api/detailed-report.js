@@ -104,6 +104,7 @@ const diffLines = (oldLines, newLines) => {
 // === ИЗВЛЕЧЕНИЕ ТЕКСТОВЫХ ФАЙЛОВ ===
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
+    console.log(`🔍 Начало обработки: ${label}, размер: ${arrayBuffer.byteLength}`);
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
@@ -113,41 +114,52 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
       return {};
     }
 
+    console.log(`✅ Архив содержит ${entries.length} записей`);
     const files = {};
 
     for (const entry of entries) {
-      // Защита от битых записей
+      console.log('📌 Обработка записи:', entry);
+
       if (!entry) {
-        console.warn('⚠️ Пропущена: entry === undefined');
+        console.warn('❌ entry === undefined');
         continue;
       }
 
-      if (!entry.filename || !entry.filename.trim()) {
-        console.warn('⚠️ Пропущена: нет имени файла', entry);
+      if (!entry.filename) {
+        console.warn('❌ entry.filename === undefined');
         continue;
       }
 
-      if (entry.directory) continue;
+      if (entry.directory) {
+        console.log('🗂️ Папка — пропускаем:', entry.filename);
+        continue;
+      }
 
-      if (!isTextFile(entry.filename)) continue;
+      if (!isTextFile(entry.filename)) {
+        console.log('📄 Не текстовый файл — пропускаем:', entry.filename);
+        continue;
+      }
 
       let relativePath = entry.filename;
+      console.log('📄 Текстовый файл:', entry.filename);
 
       try {
-        // Удаляем папки вида /2024-01-01/
+        console.log('1. До /2024-01-01/:', relativePath);
         relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+        console.log('2. После даты:', relativePath);
 
-        // Удаляем первую папку (например, final_6_1_0_5/)
         relativePath = relativePath.replace(/^[^\/]+\/?/, '');
+        console.log('3. После корня:', relativePath);
 
-        // Убираем начальные слэши
         relativePath = relativePath.replace(/^\/+/, '');
+        console.log('4. После слэшей:', relativePath);
 
         if (!relativePath) {
-          throw new Error('relativePath пуст после нормализации');
+          console.error('❌ relativePath пуст');
+          continue;
         }
       } catch (err) {
-        console.error('❌ Ошибка при нормализации пути:', entry.filename, err.message);
+        console.error('❌ Ошибка при обработке пути:', entry.filename, err.message);
         continue;
       }
 
@@ -155,8 +167,9 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
         const blob = await entry.getData(new BlobWriter());
         const text = await blob.text();
         files[relativePath] = text;
+        console.log('✅ Успешно извлечено:', relativePath);
       } catch (err) {
-        console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
+        console.error('❌ Ошибка чтения:', entry.filename, err.message);
         files[relativePath] = null;
       }
     }
@@ -165,6 +178,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     return files;
   } catch (err) {
     console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
+    console.error('❌ Стек:', err.stack);
     return {};
   }
 };
