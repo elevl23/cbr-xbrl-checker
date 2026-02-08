@@ -109,7 +109,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     const reader = new ZipReader(new BlobReader(blob));
     const entries = await reader.getEntries();
 
-    if (entries.length === 0) {
+    if (!entries || entries.length === 0) {
       await reader.close();
       return {};
     }
@@ -117,47 +117,70 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     const files = {};
 
     for (const entry of entries) {
-      if (!entry) {
-        console.warn('⚠️ Пропущена: entry === undefined');
-        continue;
-      }
-
-      if (!entry.filename) {
-        console.warn('⚠️ Пропущена: entry.filename === undefined', entry);
-        continue;
-      }
-
-      if (entry.directory) continue;
-
-      if (!isTextFile(entry.filename)) continue;
-
-      let relativePath = entry.filename || '';
-
       try {
-        if (!relativePath) throw new Error('relativePath пуст');
+        // --- Полная защита ---
+        if (!entry) {
+          console.warn('⚠️ entry === undefined');
+          continue;
+        }
 
-        // Удаляем папки вида /2024-01-01/
-        relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+        if (!entry.filename) {
+          console.warn('⚠️ Пропущена: нет имени файла', entry);
+          continue;
+        }
 
-        // Удаляем первую папку
-        relativePath = relativePath.replace(/^[^\/]+\/?/, '');
+        if (typeof entry.filename !== 'string') {
+          console.warn('⚠️ Пропущена: filename не строка', entry);
+          continue;
+        }
 
-        // Убираем начальные слэши
-        relativePath = relativePath.replace(/^\/+/, '');
+        if (entry.directory) {
+          console.log('🗂️ Папка — пропускаем:', entry.filename);
+          continue;
+        }
 
-        if (!relativePath) throw new Error('relativePath пуст после нормализации');
-      } catch (err) {
-        console.error('❌ Ошибка при нормализации пути:', entry.filename, err.message);
-        continue;
-      }
+        if (!isTextFile(entry.filename)) {
+          console.log('📄 Не текстовый — пропускаем:', entry.filename);
+          continue;
+        }
 
-      try {
+        let relativePath = entry.filename;
+
+        // --- Нормализация пути ---
+        try {
+          relativePath = relativePath.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
+          relativePath = relativePath.replace(/^[^\/]+\/?/, '');
+          relativePath = relativePath.replace(/^\/+/, '');
+
+          if (!relativePath || typeof relativePath !== 'string') {
+            throw new Error('relativePath пуст или не строка');
+          }
+        } catch (err) {
+          console.error('❌ Ошибка нормализации пути:', entry.filename, err.message);
+          continue;
+        }
+
+        // --- Извлечение данных ---
+        if (typeof entry.getData !== 'function') {
+          console.error('❌ getData — не функция', entry);
+          files[relativePath] = null;
+          continue;
+        }
+
         const blob = await entry.getData(new BlobWriter());
+        if (!blob || typeof blob.text !== 'function') {
+          console.error('❌ blob — не валидный', entry.filename);
+          files[relativePath] = null;
+          continue;
+        }
+
         const text = await blob.text();
         files[relativePath] = text;
+        console.log('✅ Успешно извлечено:', relativePath);
+
       } catch (err) {
-        console.error(`❌ Ошибка при чтении файла ${entry.filename}:`, err.message);
-        files[relativePath] = null;
+        console.error('❌ Ошибка при обработке файла:', err.message, entry);
+        continue; // не останавливаем весь цикл
       }
     }
 
