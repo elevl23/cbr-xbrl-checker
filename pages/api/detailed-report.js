@@ -23,12 +23,13 @@ const diffLines = (oldLines, newLines) => {
 
     let foundMatch = false;
 
-    // Ищем вперёд: возможно, вставлены строки
-    const oldLine = oldLines[i]?.trim();
-    if (oldLine) {
+    // Ищем вперёд: возможно, строки добавлены
+    const currentOldLine = oldLines[i]?.trim();
+    if (currentOldLine) {
       for (let k = 1; k <= MAX_LOOKAHEAD && j + k < newLines.length; k++) {
-        if (newLines[j + k].trim() === oldLine) {
-          while (j < j + k) {
+        if (newLines[j + k].trim() === currentOldLine) {
+          const target = j + k;
+          while (j < target) {
             result.push({ type: 'added', value: newLines[j] });
             j++;
           }
@@ -40,12 +41,13 @@ const diffLines = (oldLines, newLines) => {
 
     if (foundMatch) continue;
 
-    // Ищем вперёд: возможно, удалены строки
-    const newLine = newLines[j]?.trim();
-    if (newLine) {
+    // Ищем вперёд: возможно, строки удалены
+    const currentNewLine = newLines[j]?.trim();
+    if (currentNewLine) {
       for (let k = 1; k <= MAX_LOOKAHEAD && i + k < oldLines.length; k++) {
-        if (oldLines[i + k].trim() === newLine) {
-          while (i < i + k) {
+        if (oldLines[i + k].trim() === currentNewLine) {
+          const target = i + k;
+          while (i < target) {
             result.push({ type: 'removed', value: oldLines[i] });
             i++;
           }
