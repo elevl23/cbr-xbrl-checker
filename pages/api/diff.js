@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js';
 
@@ -9,45 +8,14 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// Нормализация XSD-элементов: сортировка атрибутов
-const normalizeXsdElement = (line) => {
-  const match = line.match(/<xsd:element\s+(.*?)\s*\/>/);
-  if (!match) return line;
-
-  const attrsStr = match[1];
-  const attrs = {};
-
-  // Простой парсинг атрибутов (для xsd:element)
-  attrsStr.replace(/(\w+:[\w-]+|[\w-]+)\s*=\s*"([^"]*)"/g, (_, key, value) => {
-    attrs[key] = value;
-  });
-
-  const sortedKeys = Object.keys(attrs).sort();
-  const sortedAttrs = sortedKeys.map(key => `${key}="${attrs[key]}"`).join(' ');
-
-  return `<xsd:element ${sortedAttrs}/>`;
-};
-
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
   while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length) {
-      const oldLine = oldLines[i].trim();
-      const newLine = newLines[j].trim();
-
-      // Нормализуем строки с xsd:element
-      const normOld = oldLine.includes('<xsd:element') ? normalizeXsdElement(oldLine) : oldLine;
-      const normNew = newLine.includes('<xsd:element') ? normalizeXsdElement(newLine) : newLine;
-
-      if (normOld === normNew) {
-        result.push({ type: 'same', value: oldLines[i] });
-        i++; j++;
-        continue;
-      }
-    }
-
-    if (j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+      result.push({ type: 'same', value: oldLines[i] });
+      i++; j++;
+    } else if (j < newLines.length) {
       result.push({ type: 'added', value: newLines[j] });
       j++;
     } else {
@@ -79,10 +47,7 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
 
     for (const entry of entries) {
       if (!entry.directory && isTextFile(entry.filename)) {
-        // Убираем папки с датами: /2025-02-25/ → удаляется
-        const normalizedPath = entry.filename.replace(/\/\d{4}-\d{2}-\d{2}\//g, '/');
-        const relativePath = rootFolder ? normalizedPath.replace(rootFolder, '') : normalizedPath;
-
+        const relativePath = rootFolder ? entry.filename.replace(rootFolder, '') : entry.filename;
         try {
           const blob = await entry.getData(new BlobWriter());
           const text = await blob.text();
@@ -113,14 +78,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Не хватает old_url или new_url' });
     }
 
-    console.log('📥 Сравнение:', { old_url, new_url });
+    console.log('📥 Генерация детального отчёта:', { old_url, new_url });
 
     const download = async (url, label) => {
       try {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           headers: { 'User-Agent': 'CBR-Checker/1.0' },
-          timeout: 20000,
+          timeout: 30000,
           maxContentLength: 15 * 1024 * 1024
         });
         console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
@@ -167,12 +132,40 @@ export default async function handler(req, res) {
       modified: changes.filter(c => c.type === 'modified').length
     };
 
-    return res.status(200).json({ summary });
+    // === ГЕНЕРАЦИЯ CSV ===
+    const jsonToCsv = (changes) => {
+      const separator = ',';
+      const header = ['type', 'file', 'change_type', 'line'].join(separator);
+      const rows = changes.flatMap(item => {
+        if (item.type === 'modified') {
+          return item.diff.map(d => {
+            const changeType = d.type === 'same' ? 'без изменений' : d.type;
+            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+          });
+        } else {
+          return [`"${item.type}","${item.file}","-","-"`];
+        }
+      });
+      return [header, ...rows].join('\n');
+    };
+
+    const csv = jsonToCsv(changes);
+
+    // === КОНВЕРТАЦИЯ В data:text/csv;base64 ===
+    const base64 = Buffer.from(csv).toString('base64');
+    const report_url = `data:text/csv;base64,${base64}`;
+
+    // === ОТВЕТ ===
+    return res.status(200).json({
+      summary,
+      report_url,
+      message: 'Готово. Отчёт встроен в ссылку.'
+    });
 
   } catch (error) {
-    console.error('💥 Критическая ошибка:', error.message);
+    console.error('💥 Ошибка при генерации детального отчёта:', error.message);
     return res.status(500).json({
-      error: 'Не удалось сравнить архивы',
+      error: 'Не удалось создать отчёт',
       message: error.message
     });
   }
