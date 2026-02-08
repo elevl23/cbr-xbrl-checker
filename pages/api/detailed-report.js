@@ -126,21 +126,23 @@ export default async function handler(req, res) {
     }
 
     // === ГЕНЕРАЦИЯ CSV ===
-    const jsonToCsv = (changes) => {
-      const separator = ',';
-      const header = ['type', 'file', 'change_type', 'line'].join(separator);
-      const rows = changes.flatMap(item => {
-        if (item.type === 'modified') {
-          return item.diff.map(d => {
-            const changeType = d.type === 'same' ? 'без изменений' : d.type;
-            return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
-          });
-        } else {
-          return [`"${item.type}","${item.file}","-","-"`];
-        }
-      });
-      return [header, ...rows].join('\n');
-    };
+const jsonToCsv = (changes) => {
+  const separator = ',';
+  const header = ['type', 'file', 'change_type', 'line'].join(separator);
+  const rows = changes.flatMap(item => {
+    if (item.type === 'modified') {
+      return item.diff
+        .filter(d => d.type !== 'same') // Исключаем неизменённые строки
+        .map(d => {
+          const changeType = d.type === 'added' ? 'добавлено' : 'удалено'; // Более понятные метки
+          return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+        });
+    } else {
+      return [`"${item.type}","${item.file}","-","-"`];
+    }
+  });
+  return [header, ...rows].join('\n');
+};
 
     const csv = jsonToCsv(changes);
 
