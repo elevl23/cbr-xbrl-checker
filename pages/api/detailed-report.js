@@ -254,37 +254,40 @@ export default async function handler(req, res) {
 
     const changes = [];
 
-    // Удалённые файлы
-    for (const name of Object.keys(oldFiles)) {
-      if (!newFiles[name]) {
-        changes.push({ type: 'deleted', file: name });
-      }
+// Удалённые файлы
+for (const name of Object.keys(oldFiles)) {
+  if (!newFiles[name]) {
+    changes.push({ type: 'deleted', file: name });
+  }
+}
+
+// Новые файлы
+for (const name of Object.keys(newFiles)) {
+  if (!oldFiles[name]) {
+    changes.push({ type: 'added', file: name });
+  }
+}
+
+// Изменённые файлы
+for (const name of Object.keys(newFiles)) {
+  const oldContent = oldFiles[name];
+  const newContent = newFiles[name];
+
+  if (
+    typeof oldContent === 'string' &&
+    typeof newContent === 'string' &&
+    oldContent !== newContent
+  ) {
+    const oldLines = oldContent.split('\n');
+    const newLines = newContent.split('\n');
+    const diff = diffLines(oldLines, newLines);
+
+    const realChanges = diff.filter(d => d.type !== 'same');
+    if (realChanges.length > 0) {
+      changes.push({ type: 'modified', file: name, diff: realChanges });
     }
-
-    // Новые файлы
-    for (const name of Object.keys(newFiles)) {
-      if (!oldFiles[name]) {
-        changes.push({ type: 'added', file: name });
-      }
-    }
-
-    // Изменённые файлы
-    for (const name of Object.keys(newFiles)) {
-      if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
-        const oldText = oldFiles[name] || '';
-        const newText = newFiles[name] || '';
-
-        const oldLines = oldText.split('\n');
-        const newLines = newText.split('\n');
-        const diff = diffLines(oldLines, newLines);
-
-        // Оставляем только added/removed
-        const realChanges = diff.filter(d => d.type !== 'same');
-        if (realChanges.length > 0) {
-          changes.push({ type: 'modified', file: name, diff: realChanges });
-        }
-      }
-    }
+  }
+}
 
     // === ГЕНЕРАЦИЯ CSV С ТЕХНИЧЕСКИМИ ПОЛЯМИ ===
     const jsonToCsv = (changes) => {
