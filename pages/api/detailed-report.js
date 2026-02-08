@@ -25,6 +25,11 @@ const diffLines = (oldLines, newLines) => {
   return result;
 };
 
+// Нормализация пути: заменяем даты в формате YYYY-MM-DD на {date}
+const normalizePath = (filename) => {
+  return filename.replace(/\/(\d{4}-\d{2}-\d{2})\//g, '/{date}/');
+};
+
 const extractAllTextFiles = async (arrayBuffer, label) => {
   try {
     const { ZipReader, BlobReader, BlobWriter } = await import('@zip.js/zip.js');
@@ -102,47 +107,60 @@ export default async function handler(req, res) {
     const oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
     const newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
 
-    const changes = [];
+    // === Нормализация и сравнение файлов ===
+    const oldFilesMap = new Map(); // normPath → { origName, content }
+    const newFilesMap = new Map(); // normPath → { origName, content }
 
     for (const name of Object.keys(oldFiles)) {
-      if (!newFiles[name]) {
-        changes.push({ type: 'deleted', file: name });
-      }
+      const norm = normalizePath(name);
+      oldFilesMap.set(norm, { origName: name, content: oldFiles[name] });
     }
 
     for (const name of Object.keys(newFiles)) {
-      if (!oldFiles[name]) {
-        changes.push({ type: 'added', file: name });
-      }
+      const norm = normalizePath(name);
+      newFilesMap.set(norm, { origName: name, content: newFiles[name] });
     }
 
-    for (const name of Object.keys(newFiles)) {
-      if (oldFiles[name] && oldFiles[name] !== newFiles[name]) {
-        const oldLines = oldFiles[name].split('\n');
-        const newLines = newFiles[name].split('\n');
+    const changes = [];
+
+    // 1. Проверяем удалённые и изменённые
+    for (const [normName, oldEntry] of oldFilesMap) {
+      const newEntry = newFilesMap.get(normName);
+      if (!newEntry) {
+        changes.push({ type: 'deleted', file: oldEntry.origName });
+      } else if (newEntry.content !== oldEntry.content) {
+        const oldLines = oldEntry.content.split('\n');
+        const newLines = newEntry.content.split('\n');
         const diff = diffLines(oldLines, newLines);
-        changes.push({ type: 'modified', file: name, diff });
+        changes.push({ type: 'modified', file: newEntry.origName, diff });
+      }
+    }
+
+    // 2. Проверяем добавленные
+    for (const [normName, newEntry] of newFilesMap) {
+      if (!oldFilesMap.has(normName)) {
+        changes.push({ type: 'added', file: newEntry.origName });
       }
     }
 
     // === ГЕНЕРАЦИЯ CSV ===
-const jsonToCsv = (changes) => {
-  const separator = ',';
-  const header = ['type', 'file', 'change_type', 'line'].join(separator);
-  const rows = changes.flatMap(item => {
-    if (item.type === 'modified') {
-      return item.diff
-        .filter(d => d.type !== 'same') // Исключаем неизменённые строки
-        .map(d => {
-          const changeType = d.type === 'added' ? 'добавлено' : 'удалено'; // Более понятные метки
-          return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
-        });
-    } else {
-      return [`"${item.type}","${item.file}","-","-"`];
-    }
-  });
-  return [header, ...rows].join('\n');
-};
+    const jsonToCsv = (changes) => {
+      const separator = ',';
+      const header = ['type', 'file', 'change_type', 'line'].join(separator);
+      const rows = changes.flatMap(item => {
+        if (item.type === 'modified') {
+          return item.diff
+            .filter(d => d.type !== 'same') // Исключаем неизменённые строки
+            .map(d => {
+              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+              return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+            });
+        } else {
+          return [`"${item.type}","${item.file}","-","-"`];
+        }
+      });
+      return [header, ...rows].join('\n');
+    };
 
     const csv = jsonToCsv(changes);
 
