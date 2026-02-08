@@ -249,20 +249,63 @@ export default async function handler(req, res) {
       });
     }
 
-    const gistResponse = await axios.post('https://api.github.com/gists', {
-      description: 'CBR XBRL-CSV Diff Report',
-      public: true,
-      files: {
-        'xbrl-changes.csv': {
-          content: csv
-        }
+    try {
+  console.log('📤 Отправляем данные в GitHub Gist...');
+  console.log('📝 Размер CSV:', csv.length);
+
+  const gistResponse = await axios.post('https://api.github.com/gists', {
+    description: 'CBR XBRL-CSV Diff Report',
+    public: true,
+    files: {
+      'xbrl-changes.csv': {
+        content: csv
       }
-    }, {
-      headers: {
-        'Authorization': `Bearer ${GIST_TOKEN}`,
-        'User-Agent': 'cbr-xbrl-checker'
-      }
+    }
+  }, {
+    headers: {
+      'Authorization': `Bearer ${GIST_TOKEN}`,
+      'User-Agent': 'cbr-xbrl-checker',
+      'Accept': 'application/vnd.github.v3+json'
+    }
+  });
+
+  console.log('✅ Gist успешно создан:', gistResponse.data.html_url);
+  const gistUrl = gistResponse.data.html_url;
+
+  return res.status(200).json({
+    summary: {
+      total_changes: changes.length,
+      added: changes.filter(c => c.type === 'added').length,
+      deleted: changes.filter(c => c.type === 'deleted').length,
+      modified: changes.filter(c => c.type === 'modified').length
+    },
+    report_url: gistUrl,
+    message: 'Готово. Полный отчёт доступен по ссылке.'
+  });
+
+} catch (error) {
+  if (error.response) {
+    console.error('❌ Ошибка от GitHub API:', error.response.status, error.response.data);
+    console.error('🔍 Детали:', JSON.stringify(error.response.data, null, 2));
+    return res.status(500).json({
+      error: 'Ошибка при создании Gist',
+      message: `GitHub вернул ${error.response.status}: ${error.response.data.message}`,
+      github: error.response.data
     });
+  } else if (error.request) {
+    console.error('❌ Нет ответа от GitHub:', error.request);
+    return res.status(500).json({
+      error: 'Нет ответа от GitHub',
+      message: 'Проверь токен и доступ к api.github.com'
+    });
+  } else {
+    console.error('❌ Ошибка при настройке запроса:', error.message);
+    return res.status(500).json({
+      error: 'Ошибка запроса',
+      message: error.message
+    });
+  }
+}
 
     const gistUrl = gistResponse.data.html_url;
 
