@@ -90,8 +90,8 @@ export default async function handler(req, res) {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           headers: { 'User-Agent': 'CBR-Checker/1.0' },
-          timeout: 60000,
-          maxContentLength: 30 * 1024 * 1024
+          timeout: 20000,
+          maxContentLength: 15 * 1024 * 1024
         });
         console.log(`✅ ${label} скачан, размер: ${response.data.byteLength}`);
         return response.data;
@@ -104,13 +104,8 @@ export default async function handler(req, res) {
     const oldArrayBuffer = await download(old_url, 'старый ZIP');
     const newArrayBuffer = await download(new_url, 'новый ZIP');
 
-    console.log('🔍 Начинаем извлечение файлов из старого архива...');
     const oldFiles = await extractAllTextFiles(oldArrayBuffer, 'старого архива');
-    console.log('✅ Старые файлы извлечены:', Object.keys(oldFiles).length);
-
-    console.log('🔍 Начинаем извлечение файлов из нового архива...');
     const newFiles = await extractAllTextFiles(newArrayBuffer, 'нового архива');
-    console.log('✅ Новые файлы извлечены:', Object.keys(newFiles).length);
 
     // === Нормализация и сравнение файлов ===
     const oldFilesMap = new Map(); // normPath → { origName, content }
@@ -150,92 +145,22 @@ export default async function handler(req, res) {
 
     // === ГЕНЕРАЦИЯ CSV ===
     const jsonToCsv = (changes) => {
-  const separator = ',';
-  const header = [
-    'type',
-    'file',
-    'change_type',
-    'line',
-    'line_length',
-    'line_normalized',
-    'line_number_in_diff',
-    'context_before',
-    'context_after'
-  ].join(separator);
-
-  const rows = changes.flatMap(item => {
-    if (item.type === 'modified') {
-      return item.diff
-        .filter(d => d.type !== 'same')
-        .map((d, idx, arr) => {
-          const value = d.value || '';
-          const trimmed = value.trim();
-
-          // Нормализация: убираем лишние пробелы, сортируем атрибуты (для XML)
-          const normalizeXml = (str) => {
-            const cleaned = str.trim();
-            const tagMatch = cleaned.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
-            if (!tagMatch) return cleaned;
-
-            const tag = tagMatch[1] || tagMatch[4];
-            const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
-            const content = tagMatch[3] || '';
-
-            // Извлекаем и сортируем атрибуты
-            const sortedAttrs = attrsStr
-              .replace(/\s+/g, ' ')
-              .split(' ')
-              .filter(attr => attr.includes('='))
-              .map(attr => {
-                const [key, ...valParts] = attr.split('=');
-                const val = valParts.join('=');
-                return `${key.trim()}=${val.trim()}`;
-              })
-              .sort()
-              .join(' ');
-
-            return content
-              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`.trim()
-              : `<${tag} ${sortedAttrs}/>`;
-          };
-
-          const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
-
-          // Контекст
-          const prevLine = idx > 0 ? (arr[idx - 1].value || '').trim() : '';
-          const nextLine = idx < arr.length - 1 ? (arr[idx + 1].value || '').trim() : '';
-
-          const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
-
-          return [
-            `"${item.type}"`,
-            `"${item.file.replace(/"/g, '""')}"`,
-            `"${changeType}"`,
-            `"${value.replace(/"/g, '""')}"`,
-            value.length,
-            `"${normalized.replace(/"/g, '""')}"`,
-            idx + 1,
-            `"${prevLine.replace(/"/g, '""')}"`,
-            `"${nextLine.replace(/"/g, '""')}"`
-          ].join(separator);
-        });
-    } else {
-      return [
-        `"${item.type}"`,
-        `"${item.file.replace(/"/g, '""')}"`,
-        '"-"',
-        '"-"',
-        '""',
-        '""',
-        '""',
-        '""',
-        '""'
-      ].join(separator);
-    }
-  });
-
-  return [header, ...rows].join('\n');
-};
+      const separator = ',';
+      const header = ['type', 'file', 'change_type', 'line'].join(separator);
+      const rows = changes.flatMap(item => {
+        if (item.type === 'modified') {
+          return item.diff
+            .filter(d => d.type !== 'same') // Исключаем неизменённые строки
+            .map(d => {
+              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+              return `"${item.type}","${item.file}","${changeType}","${d.value.replace(/"/g, '""')}"`;
+            });
+        } else {
+          return [`"${item.type}","${item.file}","-","-"`];
+        }
+      });
+      return [header, ...rows].join('\n');
+    };
 
     const csv = jsonToCsv(changes);
 
@@ -249,63 +174,20 @@ export default async function handler(req, res) {
       });
     }
 
-    try {
-  console.log('📤 Отправляем данные в GitHub Gist...');
-  console.log('📝 Размер CSV:', csv.length);
-
-  const gistResponse = await axios.post('https://api.github.com/gists', {
-    description: 'CBR XBRL-CSV Diff Report',
-    public: true,
-    files: {
-      'xbrl-changes.csv': {
-        content: csv
+    const gistResponse = await axios.post('https://api.github.com/gists', {
+      description: 'CBR XBRL-CSV Diff Report',
+      public: true,
+      files: {
+        'xbrl-changes.csv': {
+          content: csv
+        }
       }
-    }
-  }, {
-    headers: {
-      'Authorization': `Bearer ${GIST_TOKEN}`,
-      'User-Agent': 'cbr-xbrl-checker',
-      'Accept': 'application/vnd.github.v3+json'
-    }
-  });
-
-  console.log('✅ Gist успешно создан:', gistResponse.data.html_url);
-  const gistUrl = gistResponse.data.html_url;
-
-  return res.status(200).json({
-    summary: {
-      total_changes: changes.length,
-      added: changes.filter(c => c.type === 'added').length,
-      deleted: changes.filter(c => c.type === 'deleted').length,
-      modified: changes.filter(c => c.type === 'modified').length
-    },
-    report_url: gistUrl,
-    message: 'Готово. Полный отчёт доступен по ссылке.'
-  });
-
-} catch (error) {
-  if (error.response) {
-    console.error('❌ Ошибка от GitHub API:', error.response.status, error.response.data);
-    console.error('🔍 Детали:', JSON.stringify(error.response.data, null, 2));
-    return res.status(500).json({
-      error: 'Ошибка при создании Gist',
-      message: `GitHub вернул ${error.response.status}: ${error.response.data.message}`,
-      github: error.response.data
+    }, {
+      headers: {
+        'Authorization': `Bearer ${GIST_TOKEN}`,
+        'User-Agent': 'cbr-xbrl-checker'
+      }
     });
-  } else if (error.request) {
-    console.error('❌ Нет ответа от GitHub:', error.request);
-    return res.status(500).json({
-      error: 'Нет ответа от GitHub',
-      message: 'Проверь токен и доступ к api.github.com'
-    });
-  } else {
-    console.error('❌ Ошибка при настройке запроса:', error.message);
-    return res.status(500).json({
-      error: 'Ошибка запроса',
-      message: error.message
-    });
-  }
-}
 
     const gistUrl = gistResponse.data.html_url;
 
