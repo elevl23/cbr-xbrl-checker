@@ -12,19 +12,31 @@ const diffLines = (oldLines, newLines) => {
   let i = 0, j = 0;
   while (i < oldLines.length || j < newLines.length) {
     if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-      result.push({ type: 'same', value: oldLines[i] });
+      result.push({ 
+        type: 'same', 
+        value: oldLines[i],
+        oldIndex: i + 1,
+        newIndex: j + 1
+      });
       i++; j++;
     } else if (j < newLines.length) {
-      result.push({ type: 'added', value: newLines[j] });
+      result.push({ 
+        type: 'added', 
+        value: newLines[j],
+        newIndex: j + 1
+      });
       j++;
     } else {
-      result.push({ type: 'removed', value: oldLines[i] });
+      result.push({ 
+        type: 'removed', 
+        value: oldLines[i],
+        oldIndex: i + 1
+      });
       i++;
     }
   }
   return result;
 };
-
 // Нормализация пути: заменяем даты в формате YYYY-MM-DD на {date}
 const normalizePath = (filename) => {
   return filename.replace(/\/(\d{4}-\d{2}-\d{2})\//g, '/{date}/');
@@ -140,9 +152,7 @@ export default async function handler(req, res) {
         changes.push({ 
   type: 'modified', 
   file: newEntry.origName, 
-  diff,
-  fileContentOld: oldEntry.content,
-  fileContentNew: newEntry.content
+  diff 
 });
       }
     }
@@ -217,33 +227,15 @@ export default async function handler(req, res) {
           const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
           const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
 
-          // Номер строки в старом и новом файле
-          let lineNumberOld = '';
-          let lineNumberNew = '';
-
-          if (d.type === 'removed') {
-            // Ищем в oldLines
-            const oldLines = item.fileContentOld?.split('\n') || [];
-            const index = oldLines.findIndex(line => line.trim() === value.trim());
-            lineNumberOld = index !== -1 ? index + 1 : '';
-          }
-
-          if (d.type === 'added') {
-            // Ищем в newLines
-            const newLines = item.fileContentNew?.split('\n') || [];
-            const index = newLines.findIndex(line => line.trim() === value.trim());
-            lineNumberNew = index !== -1 ? index + 1 : '';
-          }
-
           return [
             `"${item.type}"`,
             `"${item.file.replace(/"/g, '""')}"`,
             `"${changeType}"`,
             `"${value.replace(/"/g, '""')}"`,
             value.length,
-            `"${normalized.replace(/"/g, '""')}"`,
-            lineNumberOld,
-            lineNumberNew
+            `"${normalized.replace(/"/g, '""')}"`
+            d.oldIndex || '',
+            d.newIndex || ''
           ].join(separator);
         });
     } else {
