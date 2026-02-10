@@ -176,82 +176,114 @@ export default async function handler(req, res) {
 
     // === 📄 ГЕНЕРАЦИЯ CSV С НОМЕРАМИ СТРОК ===
     const generateCsv = (changes) => {
-      const separator = ',';
-      const header = [
-        'type',
-        'file',
-        'change_type',
-        'line',
-        'line_length',
-        'normalized_line',
-        'line_number_in_old',
-        'line_number_in_new'
-      ].join(separator);
+  const separator = ',';
+  const header = [
+    'type',
+    'file',
+    'change_type',
+    'line',
+    'line_length',
+    'normalized_line',
+    'line_number_in_old',
+    'line_number_in_new'
+  ].join(separator);
 
-      const rows = changes.flatMap(item => {
-        if (item.type === 'modified') {
-          return item.diff
-            .filter(d => d.type !== 'same')
-            .map(d => {
-              const value = d.value || '';
-              const trimmed = value.trim();
+  // Собираем все изменения
+  const allItems = [];
+  const removedMap = new Map(); // normalized_line → запись
+  const addedMap = new Map();   // normalized_line → запись
 
-              // Нормализация XML: сортировка атрибутов
-              const normalizeXml = (str) => {
-                const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
-                if (!tagMatch) return str.trim();
+  for (const item of changes) {
+    if (item.type === 'modified') {
+      for (const d of item.diff) {
+        if (d.type !== 'same') {
+          const value = d.value || '';
+          const trimmed = value.trim();
+          if (!trimmed) continue;
 
-                const tag = tagMatch[1] || tagMatch[4];
-                const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
-                const content = tagMatch[3] || '';
+          const normalizeXml = (str) => {
+            const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
+            if (!tagMatch) return str.trim();
 
-                const sortedAttrs = attrsStr
-                  .replace(/\s+/g, ' ')
-                  .split(' ')
-                  .filter(attr => attr.includes('='))
-                  .map(attr => {
-                    const [key, ...valParts] = attr.split('=');
-                    const val = valParts.join('=');
-                    return `${key.trim()}=${val.trim()}`;
-                  })
-                  .sort()
-                  .join(' ');
+            const tag = tagMatch[1] || tagMatch[4];
+            const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
+            const content = tagMatch[3] || '';
 
-                return content
-                  ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
-                  : `<${tag} ${sortedAttrs}/>`;
-              };
+            const sortedAttrs = attrsStr
+              .replace(/\s+/g, ' ')
+              .split(' ')
+              .filter(attr => attr.includes('='))
+              .map(attr => {
+                const [key, ...valParts] = attr.split('=');
+                const val = valParts.join('=');
+                return `${key.trim()}=${val.trim()}`;
+              })
+              .sort()
+              .join(' ');
 
-              const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
-              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+            return content
+              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
+              : `<${tag} ${sortedAttrs}/>`;
+          };
 
-              return [
-                `"${item.type}"`,
-                `"${item.file.replace(/"/g, '""')}"`,
-                `"${changeType}"`,
-                `"${value.replace(/"/g, '""')}"`,
-                value.length,
-                `"${normalized.replace(/"/g, '""')}"`,
-                d.oldIndex || '',
-                d.newIndex || ''
-              ].join(separator);
-            });
-        } else {
-          return [
-            `"${item.type}"`,
-            `"${item.file.replace(/"/g, '""')}"`,
-            '"-"',
-            '"-"',
-            '""',
-            '""',
-            '""',
-            '""'
-          ].join(separator);
+          const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
+          const key = `${item.file}|${normalized}`;
+
+          const record = {
+            type: item.type,
+            file: item.file,
+            change_type: d.type === 'added' ? 'добавлено' : 'удалено',
+            line: value,
+            line_length: value.length,
+            normalized_line: normalized,
+            line_number_in_old: d.oldIndex || '',
+            line_number_in_new: d.newIndex || ''
+          };
+
+          if (d.type === 'removed') {
+            removedMap.set(key, record);
+          } else if (d.type === 'added') {
+            addedMap.set(key, record);
+          }
         }
-      });
+      }
+    }
+  }
 
-      return [header, ...rows].join('\n');
-    };
+  // Фильтруем: если есть и removed, и added с одинаковым key → это перемещение → игнорируем
+  const finalItems = [];
+
+  for (const [key, added] of addedMap) {
+    if (!removedMap.has(key)) {
+      finalItems.push(added);
+    }
+  }
+
+  for (const [key, removed] of removedMap) {
+    if (!addedMap.has(key)) {
+      finalItems.push(removed);
+    }
+  }
+
+  // Сортируем: сначала по файлу, потом по номеру строки
+  finalItems.sort((a, b) => {
+    if (a.file !== b.file) return a.file.localeCompare(b.file);
+    return (a.line_number_in_old || a.line_number_in_new) - (b.line_number_in_old || b.line_number_in_new);
+  });
+
+  const rows = finalItems.map(item => [
+    `"${item.type}"`,
+    `"${item.file.replace(/"/g, '""')}"`,
+    `"${item.change_type}"`,
+    `"${item.line.replace(/"/g, '""')}"`,
+    item.line_length,
+    `"${item.normalized_line.replace(/"/g, '""')}"`,
+    item.line_number_in_old,
+    item.line_number_in_new
+  ].join(separator));
+
+  return [header, ...rows].join('\n');
+};
 
     const csv = generateCsv(targetChanges);
 
