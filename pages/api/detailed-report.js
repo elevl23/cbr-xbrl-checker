@@ -7,7 +7,7 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
-// === diffLines с номерами строк ===
+// === diffLines с номерами строк (для отслеживания позиций) ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
@@ -83,6 +83,33 @@ const extractAllTextFiles = async (arrayBuffer, label) => {
     console.error(`❌ Ошибка при извлечении из ${label}:`, err.message);
     return {};
   }
+};
+
+// === Нормализация XML: сортировка атрибутов для сравнения ===
+const normalizeXmlLine = (str) => {
+  const trimmed = str.trim();
+  const tagMatch = trimmed.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
+  if (!tagMatch) return trimmed;
+
+  const tag = tagMatch[1] || tagMatch[4];
+  const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
+  const content = tagMatch[3] || '';
+
+  const sortedAttrs = attrsStr
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(attr => attr.includes('='))
+    .map(attr => {
+      const [key, ...valParts] = attr.split('=');
+      const val = valParts.join('=');
+      return `${key.trim()}=${val.trim()}`;
+    })
+    .sort()
+    .join(' ');
+
+  return content
+    ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
+    : `<${tag} ${sortedAttrs}/>`;
 };
 
 export default async function handler(req, res) {
@@ -162,132 +189,94 @@ export default async function handler(req, res) {
       }
     }
 
-    // === 🔍 ФИЛЬТР: ТОЛЬКО mem-int.xsd ===
-    const TARGET_FILE = 'www.cbr.ru/xbrl/udr/dom/mem-int.xsd';
-
-    const targetChanges = changes.filter(change => {
-      if (change.type === 'modified') {
-        return change.file.includes(TARGET_FILE);
-      } else if (change.type === 'added' || change.type === 'deleted') {
-        return change.file.includes(TARGET_FILE);
-      }
-      return false;
-    });
-
-    // === 📄 ГЕНЕРАЦИЯ CSV С НОМЕРАМИ СТРОК ===
+    // === ГЕНЕРАЦИЯ CSV: ТОЛЬКО РЕАЛЬНЫЕ ИЗМЕНЕНИЯ (БЕЗ ПЕРЕМЕЩЕНИЙ) ===
     const generateCsv = (changes) => {
-  const separator = ',';
-  const header = [
-    'type',
-    'file',
-    'change_type',
-    'line',
-    'line_length',
-    'normalized_line',
-    'line_number_in_old',
-    'line_number_in_new'
-  ].join(separator);
+      const separator = ',';
+      const header = ['type', 'file', 'change_type', 'line'].join(separator);
 
-  // Собираем все изменения
-  const allItems = [];
-  const removedMap = new Map(); // normalized_line → запись
-  const addedMap = new Map();   // normalized_line → запись
+      // Собираем все added и removed с нормализацией
+      const removedMap = new Map(); // key: file|normalized → запись
+      const addedMap = new Map();
 
-  for (const item of changes) {
-    if (item.type === 'modified') {
-      for (const d of item.diff) {
-        if (d.type !== 'same') {
-          const value = d.value || '';
-          const trimmed = value.trim();
-          if (!trimmed) continue;
+      for (const item of changes) {
+        if (item.type === 'modified') {
+          for (const d of item.diff) {
+            if (d.type === 'same') continue;
+            const value = d.value || '';
+            const trimmed = value.trim();
+            if (!trimmed) continue;
 
-          const normalizeXml = (str) => {
-            const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
-            if (!tagMatch) return str.trim();
+            const normalized = normalizeXmlLine(trimmed);
+            const key = `${item.file}|${normalized}`;
 
-            const tag = tagMatch[1] || tagMatch[4];
-            const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
-            const content = tagMatch[3] || '';
-
-            const sortedAttrs = attrsStr
-              .replace(/\s+/g, ' ')
-              .split(' ')
-              .filter(attr => attr.includes('='))
-              .map(attr => {
-                const [key, ...valParts] = attr.split('=');
-                const val = valParts.join('=');
-                return `${key.trim()}=${val.trim()}`;
-              })
-              .sort()
-              .join(' ');
-
-            return content
-              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
-              : `<${tag} ${sortedAttrs}/>`;
-          };
-
-          const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
-          const key = `${item.file}|${normalized}`;
-
-          const record = {
-            type: item.type,
-            file: item.file,
-            change_type: d.type === 'added' ? 'добавлено' : 'удалено',
-            line: value,
-            line_length: value.length,
-            normalized_line: normalized,
-            line_number_in_old: d.oldIndex || '',
-            line_number_in_new: d.newIndex || ''
-          };
-
-          if (d.type === 'removed') {
-            removedMap.set(key, record);
-          } else if (d.type === 'added') {
-            addedMap.set(key, record);
+            if (d.type === 'removed') {
+              removedMap.set(key, { file: item.file, value, type: 'removed' });
+            } else if (d.type === 'added') {
+              addedMap.set(key, { file: item.file, value, type: 'added' });
+            }
           }
         }
       }
-    }
-  }
 
-  // Фильтруем: если есть и removed, и added с одинаковым key → это перемещение → игнорируем
-  const finalItems = [];
+      // Фильтруем: оставляем только те, которых нет в паре
+      const finalItems = [];
 
-  for (const [key, added] of addedMap) {
-    if (!removedMap.has(key)) {
-      finalItems.push(added);
-    }
-  }
+      // Добавляем added, которых нет в removed
+      for (const [key, added] of addedMap) {
+        if (!removedMap.has(key)) {
+          finalItems.push({
+            type: 'modified',
+            file: added.file,
+            change_type: 'добавлено',
+            line: added.value
+          });
+        }
+      }
 
-  for (const [key, removed] of removedMap) {
-    if (!addedMap.has(key)) {
-      finalItems.push(removed);
-    }
-  }
+      // Добавляем removed, которых нет в added
+      for (const [key, removed] of removedMap) {
+        if (!addedMap.has(key)) {
+          finalItems.push({
+            type: 'modified',
+            file: removed.file,
+            change_type: 'удалено',
+            line: removed.value
+          });
+        }
+      }
 
-  // Сортируем: сначала по файлу, потом по номеру строки
-  finalItems.sort((a, b) => {
-    if (a.file !== b.file) return a.file.localeCompare(b.file);
-    return (a.line_number_in_old || a.line_number_in_new) - (b.line_number_in_old || b.line_number_in_new);
-  });
+      // Добавляем added/deleted файлы
+      for (const item of changes) {
+        if (item.type === 'added') {
+          finalItems.push({
+            type: 'added',
+            file: item.file,
+            change_type: '-',
+            line: '-'
+          });
+        } else if (item.type === 'deleted') {
+          finalItems.push({
+            type: 'deleted',
+            file: item.file,
+            change_type: '-',
+            line: '-'
+          });
+        }
+      }
 
-  const rows = finalItems.map(item => [
-    `"${item.type}"`,
-    `"${item.file.replace(/"/g, '""')}"`,
-    `"${item.change_type}"`,
-    `"${item.line.replace(/"/g, '""')}"`,
-    item.line_length,
-    `"${item.normalized_line.replace(/"/g, '""')}"`,
-    item.line_number_in_old,
-    item.line_number_in_new
-  ].join(separator));
+      const rows = finalItems.map(item => [
+        `"${item.type}"`,
+        `"${item.file.replace(/"/g, '""')}"`,
+        `"${item.change_type}"`,
+        `"${item.line.replace(/"/g, '""')}"`
+      ].join(separator));
 
-  return [header, ...rows].join('\n');
-};
+      return [header, ...rows].join('\n');
+    };
 
-    const csv = generateCsv(targetChanges);
+    const csv = generateCsv(changes);
 
-    // === 🚀 ОТПРАВКА В GITHUB GIST ===
+    // === ОТПРАВКА В GITHUB GIST ===
     const GIST_TOKEN = process.env.GITHUB_GIST_TOKEN;
 
     if (!GIST_TOKEN) {
@@ -298,14 +287,14 @@ export default async function handler(req, res) {
     }
 
     try {
-      console.log('📤 Отправляем в Gist только изменения по mem-int.xsd...');
+      console.log('📤 Отправляем полный отчёт в Gist...');
       console.log('📝 Размер CSV:', csv.length, 'байт');
 
       const gistResponse = await axios.post('https://api.github.com/gists', {
-        description: 'DEBUG: Только изменения в mem-int.xsd + номера строк',
+        description: 'CBR XBRL-CSV Diff Report — полный отчёт',
         public: true,
         files: {
-          'mem-int-changes.csv': {
+          'xbrl-changes.csv': {
             content: csv
           }
         }
@@ -322,10 +311,13 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         summary: {
-          changes_in_mem_int_xsd: targetChanges.length
+          total_changes: changes.length,
+          modified: changes.filter(c => c.type === 'modified').length,
+          added: changes.filter(c => c.type === 'added').length,
+          deleted: changes.filter(c => c.type === 'deleted').length
         },
         report_url: gistUrl,
-        message: 'Готово. Только изменения в mem-int.xsd выгружены в Gist.'
+        message: 'Готово. Полный отчёт доступен по ссылке.'
       });
 
     } catch (error) {
