@@ -137,7 +137,13 @@ export default async function handler(req, res) {
         const oldLines = oldEntry.content.split('\n');
         const newLines = newEntry.content.split('\n');
         const diff = diffLines(oldLines, newLines);
-        changes.push({ type: 'modified', file: newEntry.origName, diff });
+        changes.push({ 
+  type: 'modified', 
+  file: newEntry.origName, 
+  diff,
+  fileContentOld: oldEntry.content,
+  fileContentNew: newEntry.content
+});
       }
     }
 
@@ -162,76 +168,100 @@ export default async function handler(req, res) {
 
     // === 📄 ГЕНЕРАЦИЯ CSV (только для mem-int.xsd) ===
     const generateCsv = (changes) => {
-      const separator = ',';
-      const header = [
-        'type',
-        'file',
-        'change_type',
-        'line',
-        'line_length',
-        'normalized_line'
-      ].join(separator);
+  const separator = ',';
+  const header = [
+    'type',
+    'file',
+    'change_type',
+    'line',
+    'line_length',
+    'normalized_line',
+    'line_number_in_old',
+    'line_number_in_new'
+  ].join(separator);
 
-      const rows = changes.flatMap(item => {
-        if (item.type === 'modified') {
-          return item.diff
-            .filter(d => d.type !== 'same')
-            .map(d => {
-              const value = d.value || '';
-              const trimmed = value.trim();
+  const rows = changes.flatMap(item => {
+    if (item.type === 'modified') {
+      return item.diff
+        .filter(d => d.type !== 'same')
+        .map(d => {
+          const value = d.value || '';
+          const trimmed = value.trim();
 
-              // Нормализация XML: сортировка атрибутов
-              const normalizeXml = (str) => {
-                const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
-                if (!tagMatch) return str.trim();
+          // Нормализация XML
+          const normalizeXml = (str) => {
+            const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
+            if (!tagMatch) return str.trim();
 
-                const tag = tagMatch[1] || tagMatch[4];
-                const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
-                const content = tagMatch[3] || '';
+            const tag = tagMatch[1] || tagMatch[4];
+            const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
+            const content = tagMatch[3] || '';
 
-                const sortedAttrs = attrsStr
-                  .replace(/\s+/g, ' ')
-                  .split(' ')
-                  .filter(attr => attr.includes('='))
-                  .map(attr => {
-                    const [key, ...valParts] = attr.split('=');
-                    const val = valParts.join('=');
-                    return `${key.trim()}=${val.trim()}`;
-                  })
-                  .sort()
-                  .join(' ');
+            const sortedAttrs = attrsStr
+              .replace(/\s+/g, ' ')
+              .split(' ')
+              .filter(attr => attr.includes('='))
+              .map(attr => {
+                const [key, ...valParts] = attr.split('=');
+                const val = valParts.join('=');
+                return `${key.trim()}=${val.trim()}`;
+              })
+              .sort()
+              .join(' ');
 
-                return content
-                  ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
-                  : `<${tag} ${sortedAttrs}/>`;
-              };
+            return content
+              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
+              : `<${tag} ${sortedAttrs}/>`;
+          };
 
-              const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
-              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+          const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
+          const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
 
-              return [
-                `"${item.type}"`,
-                `"${item.file.replace(/"/g, '""')}"`,
-                `"${changeType}"`,
-                `"${value.replace(/"/g, '""')}"`,
-                value.length,
-                `"${normalized.replace(/"/g, '""')}"`
-              ].join(separator);
-            });
-        } else {
+          // Номер строки в старом и новом файле
+          let lineNumberOld = '';
+          let lineNumberNew = '';
+
+          if (d.type === 'removed') {
+            // Ищем в oldLines
+            const oldLines = item.fileContentOld?.split('\n') || [];
+            const index = oldLines.findIndex(line => line.trim() === value.trim());
+            lineNumberOld = index !== -1 ? index + 1 : '';
+          }
+
+          if (d.type === 'added') {
+            // Ищем в newLines
+            const newLines = item.fileContentNew?.split('\n') || [];
+            const index = newLines.findIndex(line => line.trim() === value.trim());
+            lineNumberNew = index !== -1 ? index + 1 : '';
+          }
+
           return [
             `"${item.type}"`,
             `"${item.file.replace(/"/g, '""')}"`,
-            '"-"',
-            '"-"',
-            '""',
-            '""'
+            `"${changeType}"`,
+            `"${value.replace(/"/g, '""')}"`,
+            value.length,
+            `"${normalized.replace(/"/g, '""')}"`,
+            lineNumberOld,
+            lineNumberNew
           ].join(separator);
-        }
-      });
+        });
+    } else {
+      return [
+        `"${item.type}"`,
+        `"${item.file.replace(/"/g, '""')}"`,
+        '"-"',
+        '"-"',
+        '""',
+        '""',
+        '""',
+        '""'
+      ].join(separator);
+    }
+  });
 
-      return [header, ...rows].join('\n');
-    };
+  return [header, ...rows].join('\n');
+};
 
     const csv = generateCsv(targetChanges);
 
