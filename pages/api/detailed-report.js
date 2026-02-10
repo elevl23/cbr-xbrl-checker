@@ -7,6 +7,7 @@ const isTextFile = (filename) => {
   return TEXT_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
 };
 
+// === diffLines с номерами строк ===
 const diffLines = (oldLines, newLines) => {
   const result = [];
   let i = 0, j = 0;
@@ -37,6 +38,7 @@ const diffLines = (oldLines, newLines) => {
   }
   return result;
 };
+
 // Нормализация пути: заменяем даты в формате YYYY-MM-DD на {date}
 const normalizePath = (filename) => {
   return filename.replace(/\/(\d{4}-\d{2}-\d{2})\//g, '/{date}/');
@@ -149,11 +151,7 @@ export default async function handler(req, res) {
         const oldLines = oldEntry.content.split('\n');
         const newLines = newEntry.content.split('\n');
         const diff = diffLines(oldLines, newLines);
-        changes.push({ 
-  type: 'modified', 
-  file: newEntry.origName, 
-  diff 
-});
+        changes.push({ type: 'modified', file: newEntry.origName, diff });
       }
     }
 
@@ -164,7 +162,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // === 🔍 ДИАГНОСТИКА: ОСТАВЛЯЕМ ТОЛЬКО mem-int.xsd ===
+    // === 🔍 ФИЛЬТР: ТОЛЬКО mem-int.xsd ===
     const TARGET_FILE = 'www.cbr.ru/xbrl/udr/dom/mem-int.xsd';
 
     const targetChanges = changes.filter(change => {
@@ -176,84 +174,84 @@ export default async function handler(req, res) {
       return false;
     });
 
-    // === 📄 ГЕНЕРАЦИЯ CSV (только для mem-int.xsd) ===
+    // === 📄 ГЕНЕРАЦИЯ CSV С НОМЕРАМИ СТРОК ===
     const generateCsv = (changes) => {
-  const separator = ',';
-  const header = [
-    'type',
-    'file',
-    'change_type',
-    'line',
-    'line_length',
-    'normalized_line',
-    'line_number_in_old',
-    'line_number_in_new'
-  ].join(separator);
+      const separator = ',';
+      const header = [
+        'type',
+        'file',
+        'change_type',
+        'line',
+        'line_length',
+        'normalized_line',
+        'line_number_in_old',
+        'line_number_in_new'
+      ].join(separator);
 
-  const rows = changes.flatMap(item => {
-    if (item.type === 'modified') {
-      return item.diff
-        .filter(d => d.type !== 'same')
-        .map(d => {
-          const value = d.value || '';
-          const trimmed = value.trim();
+      const rows = changes.flatMap(item => {
+        if (item.type === 'modified') {
+          return item.diff
+            .filter(d => d.type !== 'same')
+            .map(d => {
+              const value = d.value || '';
+              const trimmed = value.trim();
 
-          // Нормализация XML
-          const normalizeXml = (str) => {
-            const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
-            if (!tagMatch) return str.trim();
+              // Нормализация XML: сортировка атрибутов
+              const normalizeXml = (str) => {
+                const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
+                if (!tagMatch) return str.trim();
 
-            const tag = tagMatch[1] || tagMatch[4];
-            const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
-            const content = tagMatch[3] || '';
+                const tag = tagMatch[1] || tagMatch[4];
+                const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
+                const content = tagMatch[3] || '';
 
-            const sortedAttrs = attrsStr
-              .replace(/\s+/g, ' ')
-              .split(' ')
-              .filter(attr => attr.includes('='))
-              .map(attr => {
-                const [key, ...valParts] = attr.split('=');
-                const val = valParts.join('=');
-                return `${key.trim()}=${val.trim()}`;
-              })
-              .sort()
-              .join(' ');
+                const sortedAttrs = attrsStr
+                  .replace(/\s+/g, ' ')
+                  .split(' ')
+                  .filter(attr => attr.includes('='))
+                  .map(attr => {
+                    const [key, ...valParts] = attr.split('=');
+                    const val = valParts.join('=');
+                    return `${key.trim()}=${val.trim()}`;
+                  })
+                  .sort()
+                  .join(' ');
 
-            return content
-              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
-              : `<${tag} ${sortedAttrs}/>`;
-          };
+                return content
+                  ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
+                  : `<${tag} ${sortedAttrs}/>`;
+              };
 
-          const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
-          const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
+              const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
+              const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
 
+              return [
+                `"${item.type}"`,
+                `"${item.file.replace(/"/g, '""')}"`,
+                `"${changeType}"`,
+                `"${value.replace(/"/g, '""')}"`,
+                value.length,
+                `"${normalized.replace(/"/g, '""')}"`,
+                d.oldIndex || '',
+                d.newIndex || ''
+              ].join(separator);
+            });
+        } else {
           return [
             `"${item.type}"`,
             `"${item.file.replace(/"/g, '""')}"`,
-            `"${changeType}"`,
-            `"${value.replace(/"/g, '""')}"`,
-            value.length,
-            `"${normalized.replace(/"/g, '""')}"`
-            d.oldIndex || '',
-            d.newIndex || ''
+            '"-"',
+            '"-"',
+            '""',
+            '""',
+            '""',
+            '""'
           ].join(separator);
-        });
-    } else {
-      return [
-        `"${item.type}"`,
-        `"${item.file.replace(/"/g, '""')}"`,
-        '"-"',
-        '"-"',
-        '""',
-        '""',
-        '""',
-        '""'
-      ].join(separator);
-    }
-  });
+        }
+      });
 
-  return [header, ...rows].join('\n');
-};
+      return [header, ...rows].join('\n');
+    };
 
     const csv = generateCsv(targetChanges);
 
@@ -272,7 +270,7 @@ export default async function handler(req, res) {
       console.log('📝 Размер CSV:', csv.length, 'байт');
 
       const gistResponse = await axios.post('https://api.github.com/gists', {
-        description: 'DEBUG: Только изменения в mem-int.xsd',
+        description: 'DEBUG: Только изменения в mem-int.xsd + номера строк',
         public: true,
         files: {
           'mem-int-changes.csv': {
