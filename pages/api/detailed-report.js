@@ -157,31 +157,27 @@ export default async function handler(req, res) {
     'change_type',
     'line',
     'line_length',
-    'line_normalized',
-    'line_number_in_diff',
-    'context_before',
-    'context_after'
+    'normalized_line'
   ].join(separator);
 
-  const rows = changes.flatMap(item => {
-    if (item.type === 'modified') {
-      return item.diff
+  const rows = changes
+    .filter(item => item.type === 'modified')
+    .flatMap(item => 
+      item.diff
         .filter(d => d.type !== 'same')
-        .map((d, idx, arr) => {
+        .map(d => {
           const value = d.value || '';
           const trimmed = value.trim();
 
-          // Нормализация: убираем лишние пробелы, сортируем атрибуты (для XML)
+          // Упрощённая нормализация XML: сортируем атрибуты
           const normalizeXml = (str) => {
-            const cleaned = str.trim();
-            const tagMatch = cleaned.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
-            if (!tagMatch) return cleaned;
+            const tagMatch = str.match(/<(\w+)([^>]*)>(.*?)<\/\w+>|<(\w+)([^>]*)\s*\/>/s);
+            if (!tagMatch) return str.trim();
 
             const tag = tagMatch[1] || tagMatch[4];
             const attrsStr = (tagMatch[2] || tagMatch[5] || '').trim();
             const content = tagMatch[3] || '';
 
-            // Извлекаем и сортируем атрибуты
             const sortedAttrs = attrsStr
               .replace(/\s+/g, ' ')
               .split(' ')
@@ -195,44 +191,24 @@ export default async function handler(req, res) {
               .join(' ');
 
             return content
-              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`.trim()
+              ? `<${tag} ${sortedAttrs}>${content.trim()}</${tag}>`
               : `<${tag} ${sortedAttrs}/>`;
           };
 
           const normalized = trimmed ? normalizeXml(trimmed) : trimmed;
 
-          // Контекст
-          const prevLine = idx > 0 ? (arr[idx - 1].value || '').trim() : '';
-          const nextLine = idx < arr.length - 1 ? (arr[idx + 1].value || '').trim() : '';
-
           const changeType = d.type === 'added' ? 'добавлено' : 'удалено';
 
           return [
-            `"${item.type}"`,
+            `"modified"`,
             `"${item.file.replace(/"/g, '""')}"`,
             `"${changeType}"`,
             `"${value.replace(/"/g, '""')}"`,
             value.length,
-            `"${normalized.replace(/"/g, '""')}"`,
-            idx + 1,
-            `"${prevLine.replace(/"/g, '""')}"`,
-            `"${nextLine.replace(/"/g, '""')}"`
+            `"${normalized.replace(/"/g, '""')}"`
           ].join(separator);
-        });
-    } else {
-      return [
-        `"${item.type}"`,
-        `"${item.file.replace(/"/g, '""')}"`,
-        '"-"',
-        '"-"',
-        '""',
-        '""',
-        '""',
-        '""',
-        '""'
-      ].join(separator);
-    }
-  });
+        })
+    );
 
   return [header, ...rows].join('\n');
 };
