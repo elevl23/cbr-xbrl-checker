@@ -20,14 +20,15 @@ async function pdfToText(url) {
 
     return textParts.join('\n\n').trim();
   } catch (err) {
-    console.error(`Ошибка при извлечении текста из PDF (${url}):`, err.message);
+    console.error(`❌ Ошибка при извлечении текста из PDF (${url}):`, err.message);
     throw new Error(`Не удалось обработать PDF: ${err.message}`);
   }
 }
 
 async function handler(req, res) {
   try {
-    const { updates } = await req.json();
+    const body = await req.json();
+    const { updates } = body;
 
     if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json(
@@ -40,21 +41,21 @@ async function handler(req, res) {
       const { name, old_url, new_url } = update;
 
       if (!old_url || !new_url) {
-        console.warn('Пропущено: отсутствует URL', update);
+        console.warn('⚠️ Пропущено: отсутствует URL', update);
         continue;
       }
 
       try {
-        console.log(`Обработка PDF: ${name}`);
+        console.log(`📄 Обработка: ${name}`);
         const oldText = await pdfToText(old_url);
         const newText = await pdfToText(new_url);
 
         const transcript = `
 ### СТАРАЯ ВЕРСИЯ (${name})
-${oldText}
+${oldText.substring(0, 1000)}...
 
 ### НОВАЯ ВЕРСИЯ (${name})
-${newText}
+${newText.substring(0, 1000)}...
         `.trim();
 
         const difyRes = await fetch('https://api.dify.ai/v1/workflows/run', {
@@ -74,16 +75,20 @@ ${newText}
           difyData = await difyRes.json();
         } catch (parseError) {
           const text = await difyRes.text();
-          console.error('Dify вернул не JSON:', text);
+          console.error('❌ Dify вернул не JSON:', text);
           continue;
         }
 
-        if (difyRes.status !== 200 || difyData.error) {
-          console.error('Ошибка Dify:', difyData);
+        if (!difyRes.ok || difyData.error) {
+          console.error('❌ Ошибка Dify:', difyData);
           continue;
         }
 
-        const summary = difyData.outputs.text;
+        const summary = difyData.outputs?.text;
+        if (!summary) {
+          console.error('❌ В ответе Dify нет текста');
+          continue;
+        }
 
         const gistRes = await fetch('https://api.github.com/gists', {
           method: 'POST',
@@ -92,18 +97,16 @@ ${newText}
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            description: `Автоматическое сравнение PDF — ${name}`,
+            description: `Сравнение PDF — ${name}`,
             public: true,
             files: {
-              [`pdf-comparison-${Date.now()}.md`]: {
-                content: summary,
-              },
+              [`pdf-comparison-${Date.now()}.md`]: { content: summary },
             },
           }),
         });
 
         const gistJson = await gistRes.json();
-        console.log('✅ Результат сохранён в Gist:', gistJson.html_url);
+        console.log('✅ Gist создан:', gistJson.html_url);
       } catch (err) {
         console.error(`❌ Ошибка при обработке ${name}:`, err.message);
       }
@@ -111,9 +114,8 @@ ${newText}
 
     return NextResponse.json({ success: true, processed: updates.length });
   } catch (err) {
-    // ❌ err — это Error, у него нет .json()
-    // Но мы не вызываем err.json() — значит, ошибка не здесь
-    console.error('Ошибка в /api/pdf-compare:', err.message);
+    // ✅ Убедимся, что не вызываем err.json()
+    console.error('❌ Критическая ошибка в /api/pdf-compare:', err.message);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
       { status: 500 }
@@ -121,5 +123,6 @@ ${newText}
   }
 }
 
+// ✅ Экспортируем как default
 module.exports = handler;
 module.exports.default = handler;
