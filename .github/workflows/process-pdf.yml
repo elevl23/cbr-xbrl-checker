@@ -1,0 +1,36 @@
+name: Process PDF Comparison
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Name of the document'
+        required: true
+        default: 'Порядок составления'
+      old_url:
+        description: 'URL of old PDF'
+        required: true
+      new_url:
+        description: 'URL of new PDF'
+        required: true
+
+jobs:
+  process-pdf:
+    runs-on: ubuntu-latest
+    env:
+      DIFY_API_KEY: ${{ secrets.DIFY_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run PDF comparison
+        run: node scripts/process-pdf.js
