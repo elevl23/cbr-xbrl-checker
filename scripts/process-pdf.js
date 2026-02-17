@@ -25,9 +25,6 @@ if (!GITHUB_TOKEN || GITHUB_TOKEN.trim() === '') {
 
 if (!NAME || !OLD_URL || !NEW_URL) {
   console.error('❌ Ошибка: Не заданы входные данные (NAME, OLD_URL, NEW_URL)');
-  console.error('   NAME:', NAME);
-  console.error('   OLD_URL:', OLD_URL);
-  console.error('   NEW_URL:', NEW_URL);
   process.exit(1);
 }
 
@@ -59,37 +56,31 @@ async function run() {
     const oldText = await pdfToText(OLD_URL);
     const newText = await pdfToText(NEW_URL);
 
-    // логирование размера:
-    console.log('📝 Извлечено текста (старый):', oldText.length, 'символов');
-    console.log('📝 Извлечено текста (новый):', newText.length, 'символов');
-    
-    // Ограничиваем размер (на всякий случай)
+    // Ограничиваем, если нужно
     const MAX_LEN = 80000;
     const transcript = `
 ### СТАРАЯ ВЕРСИЯ (${NAME})
-${oldText.substring(0, MAX_LEN)}
+${oldText.length > MAX_LEN ? oldText.substring(0, MAX_LEN) + '...' : oldText}
 
 ### НОВАЯ ВЕРСИЯ (${NAME})
-${newText.substring(0, MAX_LEN)}
+${newText.length > MAX_LEN ? newText.substring(0, MAX_LEN) + '...' : newText}
     `.trim();
 
     console.log('📝 Подготовлен transcript:');
     console.log('   Длина:', transcript.length, 'символов');
     console.log('   Начало:', transcript.substring(0, 200), '...');
 
-    // === ОТПРАВКА В DIFY ===
-    console.log('📤 Отправка в Dify...');
+    // === ОТПРАВКА В DIFY (async) ===
+    console.log('📤 Отправка в Dify (async)...');
+    console.log('   Режим: async');
     console.log('   API URL: https://api.dify.ai/v1/workflows/run');
-    console.log('   Режим: blocking');
-    console.log('   Заголовки: Authorization: Bearer *** (скрыто)');
-    console.log('   Тело запроса: см. ниже');
 
     try {
-      const response = await axios.post(
+      const startRes = await axios.post(
         'https://api.dify.ai/v1/workflows/run',
         {
           inputs: { transcript },
-          response_mode: 'blocking',
+          response_mode: 'async',
           user: 'github-action-user'
         },
         {
@@ -100,28 +91,56 @@ ${newText.substring(0, MAX_LEN)}
         }
       );
 
-      console.log('📨 Статус ответа:', response.status);
-      console.log('📄 Тело ответа:', JSON.stringify(response.data, null, 2));
+      const taskId = startRes.data.task_id;
+      const workflowRunId = startRes.data.workflow_run_id;
 
-      if (response.status !== 200) {
-        console.error('❌ Dify вернул ошибку');
+      console.log('✅ Задача отправлена:', taskId);
+      console.log('   Ожидаем завершения...');
+
+      // Ждём результата
+      let result = null;
+      let attempts = 0;
+      const maxAttempts = 40; // ~4 минуты (40 * 6 сек)
+
+      while (!result && attempts < maxAttempts) {
+        console.log(`🔍 Проверка статуса... (попытка ${attempts + 1}/${maxAttempts})`);
+        try {
+          const statusRes = await axios.get(
+            `https://api.dify.ai/v1/workflows/run/${taskId}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${DIFY_API_KEY}`,
+              },
+            }
+          );
+
+          if (statusRes.data.status === 'succeeded') {
+            result = statusRes.data.data;
+            console.log('✅ Задача завершена успешно');
+          } else if (statusRes.data.status === 'failed') {
+            console.error('❌ Задача завершилась с ошибкой:', statusRes.data.error);
+            process.exit(1);
+          } else {
+            console.log('⏳ Статус:', statusRes.data.status);
+          }
+        } catch (err) {
+          console.error('⚠️ Ошибка при проверке статуса:', err.message);
+        }
+
+        if (!result) {
+          await new Promise(resolve => setTimeout(resolve, 6000)); // ждём 6 сек
+          attempts++;
+        }
+      }
+
+      if (!result) {
+        console.error('❌ Время ожидания истекло');
         process.exit(1);
       }
 
-      // Извлекаем outputs
-      const workflowData = response.data.data;
-      const outputs = workflowData?.outputs;
-
-      if (!outputs || Object.keys(outputs).length === 0) {
-        console.error('❌ outputs пустой — возможно, LLM Node не настроен на вывод');
-        console.error('Полный ответ:', JSON.stringify(workflowData, null, 2));
-        process.exit(1);
-      }
-
-      const summary = outputs.text;
+      const summary = result.outputs?.text;
       if (!summary) {
-        console.error('❌ В outputs нет поля text');
-        console.error('Полный outputs:', JSON.stringify(outputs, null, 2));
+        console.error('❌ В ответе от Dify нет поля outputs.text');
         process.exit(1);
       }
 
@@ -148,11 +167,12 @@ ${newText.substring(0, MAX_LEN)}
       console.error('❌ Ошибка при вызове Dify:');
       if (err.response) {
         console.error('   Статус:', err.response.status);
-        console.error('   Данные:', JSON.stringify(err.response.data, null, 2));
-      } else if (err.request) {
-        console.error('   Нет ответа от сервера — запрос отправлен, но ответа нет');
+        if (err.response.status === 504) {
+          console.error('   Cloudflare разорвал соединение — используйте async');
+        }
+        console.error('   Данные:', err.response.data);
       } else {
-        console.error('   Ошибка настройки запроса:', err.message);
+        console.error('   Ошибка:', err.message);
       }
       process.exit(1);
     }
