@@ -20,5 +20,5 @@
   "engines": {
     "node": ">=18"
   },
-  "type": "module"  // ✅ Добавьте эту строку
+  "type": "module"
 }
