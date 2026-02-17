@@ -25,9 +25,10 @@ async function pdfToText(url) {
   }
 }
 
-module.exports = async function POST(request) {
+// Основная функция
+async function handler(req, res) {
   try {
-    const { updates } = await request.json();
+    const { updates } = await req.json();
 
     if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json(
@@ -110,4 +111,8 @@ ${newText}
       { status: 500 }
     );
   }
-};
+}
+
+// ✅ Критически важно: экспортируем как default
+module.exports = handler;
+module.exports.default = handler;
