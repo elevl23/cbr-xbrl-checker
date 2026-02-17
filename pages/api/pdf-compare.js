@@ -1,14 +1,11 @@
 // pages/api/pdf-compare.js
 import { NextResponse } from 'next/server';
-import { getDocument } from 'pdfjs-dist';
 
-// Указываем worker через CDN — критически важно для Vercel
-// В Node.js окружении (API Route) worker не используется напрямую, но нужно для совместимости
-// Поэтому используем глобальный worker из CDN
-const workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+// ✅ Используем legacy-сборку — она не зависит от DOM
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.js';
 
-// В Node.js мы не можем использовать worker, но pdfjs-dist позволяет извлекать текст без него
-// → используем режим без worker
+// Отключаем worker — в Node.js он не нужен
+// pdf.js будет работать напрямую в памяти
 
 async function pdfToText(url) {
   try {
