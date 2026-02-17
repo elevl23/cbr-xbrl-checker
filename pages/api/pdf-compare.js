@@ -25,7 +25,6 @@ async function pdfToText(url) {
   }
 }
 
-// Основная функция
 async function handler(req, res) {
   try {
     const { updates } = await req.json();
@@ -70,7 +69,14 @@ ${newText}
           }),
         });
 
-        const difyData = await difyRes.json();
+        let difyData;
+        try {
+          difyData = await difyRes.json();
+        } catch (parseError) {
+          const text = await difyRes.text();
+          console.error('Dify вернул не JSON:', text);
+          continue;
+        }
 
         if (difyRes.status !== 200 || difyData.error) {
           console.error('Ошибка Dify:', difyData);
@@ -105,6 +111,8 @@ ${newText}
 
     return NextResponse.json({ success: true, processed: updates.length });
   } catch (err) {
+    // ❌ err — это Error, у него нет .json()
+    // Но мы не вызываем err.json() — значит, ошибка не здесь
     console.error('Ошибка в /api/pdf-compare:', err.message);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
@@ -113,6 +121,5 @@ ${newText}
   }
 }
 
-// ✅ Критически важно: экспортируем как default
 module.exports = handler;
 module.exports.default = handler;
