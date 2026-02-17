@@ -5,7 +5,7 @@ const axios = require('axios');
 
 // Получаем ключи из переменных окружения
 const DIFY_API_KEY = process.env.DIFY_API_KEY;
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_TOKEN = process.env.GH_TOKEN;
 
 // Получаем входные данные из GitHub Actions
 const NAME = process.env.INPUT_NAME;
@@ -82,19 +82,19 @@ ${newText.substring(0, MAX_LEN)}
 
     try {
       const response = await axios.post(
-  'https://api.dify.ai/v1/workflows/run',
-  {
-    inputs: { transcript },
-    response_mode: 'blocking',
-    user: 'github-action-user' 
-  },
-  {
-    headers: {
-      'Authorization': `Bearer ${DIFY_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-  }
-);
+        'https://api.dify.ai/v1/workflows/run',
+        {
+          inputs: { transcript },
+          response_mode: 'blocking',
+          user: 'github-action-user'
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${DIFY_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
 
       console.log('📨 Статус ответа:', response.status);
       console.log('📄 Тело ответа:', JSON.stringify(response.data, null, 2));
@@ -104,10 +104,20 @@ ${newText.substring(0, MAX_LEN)}
         process.exit(1);
       }
 
-      const summary = response.data.outputs?.text;
+      // Извлекаем outputs
+      const workflowData = response.data.data;
+      const outputs = workflowData?.outputs;
+
+      if (!outputs || Object.keys(outputs).length === 0) {
+        console.error('❌ outputs пустой — возможно, LLM Node не настроен на вывод');
+        console.error('Полный ответ:', JSON.stringify(workflowData, null, 2));
+        process.exit(1);
+      }
+
+      const summary = outputs.text;
       if (!summary) {
-        console.error('❌ В ответе от Dify нет поля outputs.text');
-        console.error('Полный ответ:', JSON.stringify(response.data, null, 2));
+        console.error('❌ В outputs нет поля text');
+        console.error('Полный outputs:', JSON.stringify(outputs, null, 2));
         process.exit(1);
       }
 
