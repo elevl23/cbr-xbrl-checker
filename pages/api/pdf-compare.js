@@ -1,24 +1,14 @@
 // pages/api/pdf-compare.js
 
 const { NextResponse } = require('next/server');
-const { getDocument } = require('pdfjs-dist/legacy/build/pdf.js');
+const pdf = require('pdf-parse');
 
 async function pdfToText(url) {
   try {
     const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
-    const pdf = await getDocument({ data: arrayBuffer }).promise;
-
-    const textParts = [];
-
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const text = textContent.items.map(item => item.str).join(' ');
-      textParts.push(text);
-    }
-
-    return textParts.join('\n\n').trim();
+    const data = await pdf(Buffer.from(arrayBuffer));
+    return data.text;
   } catch (err) {
     console.error(`❌ Ошибка при извлечении текста из PDF (${url}):`, err.message);
     throw new Error(`Не удалось обработать PDF: ${err.message}`);
@@ -128,7 +118,6 @@ ${newText.substring(0, 2000)}...
   }
 }
 
-// Вспомогательная функция для чтения тела запроса
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -138,6 +127,5 @@ function getRawBody(req) {
   });
 }
 
-// ✅ Экспортируем как default
 module.exports = handler;
 module.exports.default = handler;
