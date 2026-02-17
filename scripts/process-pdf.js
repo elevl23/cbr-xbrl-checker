@@ -82,20 +82,19 @@ ${newText.substring(0, MAX_LEN)}
 
     try {
       const response = await axios.post(
-        'https://api.dify.ai/v1/workflows/run',
-        {
-          inputs: { transcript },
-          response_mode: 'blocking',
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${DIFY_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          // Не бросать ошибку автоматически
-          validateStatus: () => true,
-        }
-      );
+  'https://api.dify.ai/v1/workflows/run',
+  {
+    inputs: { transcript },
+    response_mode: 'blocking',
+    user: 'github-action-user' 
+  },
+  {
+    headers: {
+      'Authorization': `Bearer ${DIFY_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+  }
+);
 
       console.log('📨 Статус ответа:', response.status);
       console.log('📄 Тело ответа:', JSON.stringify(response.data, null, 2));
