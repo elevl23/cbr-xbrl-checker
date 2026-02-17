@@ -1,7 +1,7 @@
 // pages/api/pdf-compare.js
 
-const { NextResponse } = require('next/server');
-const { getDocument } = require('pdfjs-dist/legacy/build/pdf.js');
+import { NextResponse } from 'next/server';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.js';
 
 async function pdfToText(url) {
   try {
@@ -25,10 +25,9 @@ async function pdfToText(url) {
   }
 }
 
-async function handler(req, res) {
+export async function POST(request) {
   try {
-    const body = await req.json();
-    const { updates } = body;
+    const { updates } = await request.json();
 
     if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json(
@@ -52,10 +51,10 @@ async function handler(req, res) {
 
         const transcript = `
 ### СТАРАЯ ВЕРСИЯ (${name})
-${oldText.substring(0, 1000)}...
+${oldText.substring(0, 2000)}...
 
 ### НОВАЯ ВЕРСИЯ (${name})
-${newText.substring(0, 1000)}...
+${newText.substring(0, 2000)}...
         `.trim();
 
         const difyRes = await fetch('https://api.dify.ai/v1/workflows/run', {
@@ -114,7 +113,6 @@ ${newText.substring(0, 1000)}...
 
     return NextResponse.json({ success: true, processed: updates.length });
   } catch (err) {
-    // ✅ Убедимся, что не вызываем err.json()
     console.error('❌ Критическая ошибка в /api/pdf-compare:', err.message);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
@@ -122,7 +120,3 @@ ${newText.substring(0, 1000)}...
     );
   }
 }
-
-// ✅ Экспортируем как default
-module.exports = handler;
-module.exports.default = handler;
