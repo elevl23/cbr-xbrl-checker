@@ -5,7 +5,6 @@ on:
       name:
         description: 'Name of the document'
         required: true
-        default: 'Порядок составления'
       old_url:
         description: 'URL of old PDF'
         required: true
@@ -33,4 +32,8 @@ jobs:
         run: npm install
 
       - name: Run PDF comparison
+        env:
+          INPUT_NAME: ${{ inputs.name }}
+          INPUT_OLD_URL: ${{ inputs.old_url }}
+          INPUT_NEW_URL: ${{ inputs.new_url }}
         run: node scripts/process-pdf.js
