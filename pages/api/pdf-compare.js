@@ -1,15 +1,24 @@
 // pages/api/pdf-compare.js
 import { NextResponse } from 'next/server';
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.min.mjs';
+import { getDocument } from 'pdfjs-dist';
 
-// Важно: использовать CDN для worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+// Указываем worker через CDN — критически важно для Vercel
+// В Node.js окружении (API Route) worker не используется напрямую, но нужно для совместимости
+// Поэтому используем глобальный worker из CDN
+const workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+
+// В Node.js мы не можем использовать worker, но pdfjs-dist позволяет извлекать текст без него
+// → используем режим без worker
 
 async function pdfToText(url) {
   try {
     const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
-    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+
+    // Загружаем PDF
+    const loadingTask = getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+
     const textParts = [];
 
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -21,7 +30,7 @@ async function pdfToText(url) {
 
     return textParts.join('\n\n').trim();
   } catch (err) {
-    console.error(`Ошибка при извлечении текста из ${url}:`, err.message);
+    console.error(`Ошибка при извлечении текста из PDF (${url}):`, err.message);
     throw new Error(`Не удалось обработать PDF: ${err.message}`);
   }
 }
@@ -46,7 +55,7 @@ export async function POST(request) {
       }
 
       try {
-        console.log(`Обработка: ${name}`);
+        console.log(`Обработка PDF: ${name}`);
         const oldText = await pdfToText(old_url);
         const newText = await pdfToText(new_url);
 
@@ -107,7 +116,7 @@ ${newText}
 
     return NextResponse.json({ success: true, processed: updates.length });
   } catch (err) {
-    console.error('Ошибка в pdf-compare:', err.message);
+    console.error('Ошибка в /api/pdf-compare:', err.message);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
       { status: 500 }
