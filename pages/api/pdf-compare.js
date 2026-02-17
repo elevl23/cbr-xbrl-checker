@@ -1,20 +1,13 @@
 // pages/api/pdf-compare.js
-import { NextResponse } from 'next/server';
 
-// ✅ Используем legacy-сборку — она не зависит от DOM
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.js';
-
-// Отключаем worker — в Node.js он не нужен
-// pdf.js будет работать напрямую в памяти
+const { NextResponse } = require('next/server');
+const { getDocument } = require('pdfjs-dist/legacy/build/pdf.js');
 
 async function pdfToText(url) {
   try {
     const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
-
-    // Загружаем PDF
-    const loadingTask = getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
+    const pdf = await getDocument({ data: arrayBuffer }).promise;
 
     const textParts = [];
 
@@ -32,7 +25,7 @@ async function pdfToText(url) {
   }
 }
 
-export async function POST(request) {
+module.exports = async function POST(request) {
   try {
     const { updates } = await request.json();
 
@@ -64,7 +57,6 @@ ${oldText}
 ${newText}
         `.trim();
 
-        // Вызов Dify Workflow
         const difyRes = await fetch('https://api.dify.ai/v1/workflows/run', {
           method: 'POST',
           headers: {
@@ -86,7 +78,6 @@ ${newText}
 
         const summary = difyData.outputs.text;
 
-        // Сохранение в GitHub Gist
         const gistRes = await fetch('https://api.github.com/gists', {
           method: 'POST',
           headers: {
@@ -119,4 +110,4 @@ ${newText}
       { status: 500 }
     );
   }
-}
+};
