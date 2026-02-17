@@ -1,7 +1,7 @@
 // pages/api/pdf-compare.js
 
-import { NextResponse } from 'next/server';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.js';
+const { NextResponse } = require('next/server');
+const { getDocument } = require('pdfjs-dist/legacy/build/pdf.js');
 
 async function pdfToText(url) {
   try {
@@ -25,9 +25,16 @@ async function pdfToText(url) {
   }
 }
 
-export async function POST(request) {
+async function handler(req, res) {
   try {
-    const { updates } = await request.json();
+    let body;
+    try {
+      body = JSON.parse(await getRawBody(req));
+    } catch (e) {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const { updates } = body;
 
     if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json(
@@ -120,3 +127,17 @@ ${newText.substring(0, 2000)}...
     );
   }
 }
+
+// Вспомогательная функция для чтения тела запроса
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    req.on('error', reject);
+  });
+}
+
+// ✅ Экспортируем как default
+module.exports = handler;
+module.exports.default = handler;
