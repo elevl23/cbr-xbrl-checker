@@ -5,7 +5,7 @@ const axios = require('axios');
 
 // Получаем ключи из переменных окружения
 const DIFY_API_KEY = process.env.DIFY_API_KEY;
-const GITHUB_TOKEN = process.env.GH_TOKEN;
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 // Получаем входные данные из GitHub Actions
 const NAME = process.env.INPUT_NAME;
