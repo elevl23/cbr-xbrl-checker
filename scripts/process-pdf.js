@@ -59,8 +59,12 @@ async function run() {
     const oldText = await pdfToText(OLD_URL);
     const newText = await pdfToText(NEW_URL);
 
+    // логирование размера:
+    console.log('📝 Извлечено текста (старый):', oldText.length, 'символов');
+    console.log('📝 Извлечено текста (новый):', newText.length, 'символов');
+    
     // Ограничиваем размер (на всякий случай)
-    const MAX_LEN = 10000;
+    const MAX_LEN = 80000;
     const transcript = `
 ### СТАРАЯ ВЕРСИЯ (${NAME})
 ${oldText.substring(0, MAX_LEN)}
