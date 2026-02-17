@@ -30,7 +30,7 @@ export default async function handler(req, res) {
       const href = $link.attr('href');
       const text = $link.text().trim();
 
-      if (!href || !href.includes('.zip') && !href.includes('.pdf')) return;
+      if (!href || (!href.includes('.zip') && !href.includes('.pdf'))) return;
 
       const url = new URL(href, 'https://www.cbr.ru').href;
 
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       if (text.includes('Финальная таксономия')) {
         current.taxonomy = { name: text, url, version, date };
       } else if (text.includes('Порядок составления и представления')) {
-        current.order = { name: text, url, date };
+        current.order = { name: text, url, version, date };
       } else if (text.includes('Сопроводительные материалы')) {
         current.materials = { name: text, url, version, date };
       } else if (text.includes('Методические рекомендации')) {
@@ -114,8 +114,31 @@ export default async function handler(req, res) {
 
     const new_update_available = updates.length > 0;
 
-    // 4. Возвращаем результат
-    res.status(200).json({
+    // 4. Отправляем PDF-обновления на сравнение (если есть)
+    const pdfUpdates = updates.filter(u => 
+      u.file === 'order' || 
+      u.file === 'guidelines' || 
+      u.file === 'materials'
+    );
+
+    if (pdfUpdates.length > 0) {
+      try {
+        // Вызов локального API-роута (в рамках того же проекта)
+        await fetch('/api/pdf-compare', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ updates: pdfUpdates })
+        });
+      } catch (err) {
+        console.error('Не удалось отправить PDF на сравнение:', err.message);
+        // Не прерываем основной поток — это не критично
+      }
+    }
+
+    // 5. Возвращаем результат
+    return res.status(200).json({
       files: current,
       updates,
       new_update_available,
@@ -123,7 +146,7 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('Ошибка:', error.message);
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Не удалось получить данные',
       message: error.message
     });
