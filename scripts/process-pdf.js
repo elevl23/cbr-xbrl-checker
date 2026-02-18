@@ -39,95 +39,58 @@ ${oldText.length > MAX_LEN ? oldText.substring(0, MAX_LEN) + '...' : oldText}
 ${newText.length > MAX_LEN ? newText.substring(0, MAX_LEN) + '...' : newText}
     `.trim();
 
-    console.log('📤 Отправка в Dify (streaming)...');
+    console.log('📤 Отправка в Dify (blocking) — ожидаем 504...');
 
-    const response = await axios({
-      method: 'POST',
-      url: 'https://api.dify.ai/v1/workflows/run',
-      data: {
-        inputs: { transcript },
-        response_mode: 'streaming',
-        user: 'github-action-user'
-      },
-      headers: {
-        'Authorization': `Bearer ${DIFY_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      responseType: 'stream',
-    });
-
-    // Собираем ответ
-    let fullText = '';
-    let buffer = '';
-
-    return new Promise((resolve, reject) => {
-      response.data.on('data', (chunk) => {
-        buffer += chunk.toString();
-
-        let lines = buffer.split('\n');
-        buffer = lines.pop(); // последняя — неполная
-
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const data = line.slice(5).trim();
-            if (data === '[DONE]') {
-              console.log('✅ Генерация завершена');
-              resolve();
-              return;
-            }
-
-            try {
-              const json = JSON.parse(data);
-              if (json.event === 'text' && json.data) {
-                fullText += json.data;
-              }
-            } catch (e) {
-              // Игнор
-            }
-          }
+    try {
+      await axios.post(
+        'https://api.dify.ai/v1/workflows/run',
+        {
+          inputs: { transcript },
+          response_mode: 'blocking',
+          user: 'github-action-user'
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${DIFY_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 120000 // 2 минуты
         }
-      });
-
-      response.data.on('end', () => {
-        if (!fullText.trim()) {
-          console.error('❌ Поток завершился, но текст пуст');
-          reject(new Error('Empty response'));
-        } else {
-          console.log('✅ Поток завершён. Текст собран.');
-          resolve();
-        }
-      });
-
-      response.data.on('error', (err) => {
-        console.error('❌ Ошибка потока:', err.message);
-        reject(err);
-      });
-    });
-
-    if (!fullText.trim()) {
-      console.error('❌ Ответ от Dify пустой');
-      process.exit(1);
+      );
+    } catch (err) {
+      if (err.response?.status === 504) {
+        console.log('✅ 504 — это ожидаемо. Dify обрабатывает в фоне.');
+      } else {
+        console.error('❌ Неожиданная ошибка:', err.message);
+        process.exit(1);
+      }
     }
 
-    console.log('✅ Ответ получен. Создаю Gist...');
-    const gistRes = await axios.post(
-      'https://api.github.com/gists',
-      {
-        description: `Сравнение PDF — ${NAME}`,
-        public: true,
-        files: {
-          [`pdf-comparison-${Date.now()}.md`]: { content: fullText },
-        },
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
+    // Ждём 90 секунд — пусть Dify обработает
+    console.log('⏳ Ждём 90 секунд...');
+    await new Promise(r => setTimeout(r, 90000));
+
+    // Проверим, есть ли Gist
+    console.log('🔍 Проверяем, появился ли Gist...');
+    const gistList = await axios.get('https://api.github.com/gists', {
+      headers: {
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Content-Type': 'application/json',
       }
+    });
+
+    const recent = gistList.data.find(g =>
+      g.description.includes('Сравнение PDF — Правила формирования') &&
+      new Date(g.created_at) > new Date(Date.now() - 120000)
     );
 
-    console.log('🎉 Gist создан:', gistRes.data.html_url);
+    if (recent) {
+      console.log('🎉 Gist найден:', recent.html_url);
+      console.log('✅ Успешно!');
+    } else {
+      console.error('❌ Gist не найден');
+      process.exit(1);
+    }
   } catch (err) {
     console.error('❌ Ошибка:', err.message);
     process.exit(1);
