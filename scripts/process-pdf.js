@@ -67,8 +67,12 @@ ${newText.length > MAX_LEN ? newText.substring(0, MAX_LEN) + '...' : newText}
     }
 
     // Ждём 90 секунд — пусть Dify обработает
-    console.log('⏳ Ждём 90 секунд...');
-    await new Promise(r => setTimeout(r, 90000));
+    console.log('⏳ Начинаем ожидание 90 секунд...');
+    for (let i = 0; i < 90; i++) {
+      console.log(`⏱️  ${i + 1}/90...`);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log('✅ Ожидание завершено');
 
     // Проверим, есть ли Gist
     console.log('🔍 Проверяем, появился ли Gist...');
