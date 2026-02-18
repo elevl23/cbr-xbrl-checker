@@ -41,49 +41,68 @@ ${newText.length > MAX_LEN ? newText.substring(0, MAX_LEN) + '...' : newText}
 
     console.log('📤 Отправка в Dify (streaming)...');
 
-    const response = await axios.post(
-      'https://api.dify.ai/v1/workflows/run',
-      {
+    const response = await axios({
+      method: 'POST',
+      url: 'https://api.dify.ai/v1/workflows/run',
+      data: {
         inputs: { transcript },
         response_mode: 'streaming',
         user: 'github-action-user'
       },
-      {
-        headers: {
-          'Authorization': `Bearer ${DIFY_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'stream'
-      }
-    );
+      headers: {
+        'Authorization': `Bearer ${DIFY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      responseType: 'stream',
+    });
 
-    // Собираем ответ из потока
+    // Собираем ответ
     let fullText = '';
     let buffer = '';
 
-    for await (const chunk of response.data) {
-      buffer += chunk.toString();
+    return new Promise((resolve, reject) => {
+      response.data.on('data', (chunk) => {
+        buffer += chunk.toString();
 
-      // Простая обработка SSE
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // неполная строка
+        let lines = buffer.split('\n');
+        buffer = lines.pop(); // последняя — неполная
 
-      for (const line of lines) {
-        if (line.startsWith('data:')) {
-          const data = line.slice(5).trim();
-          if (data === '[DONE]') break;
-
-          try {
-            const json = JSON.parse(data);
-            if (json.event === 'text' && json.data) {
-              fullText += json.data;
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') {
+              console.log('✅ Генерация завершена');
+              resolve();
+              return;
             }
-          } catch (e) {
-            // игнор
+
+            try {
+              const json = JSON.parse(data);
+              if (json.event === 'text' && json.data) {
+                fullText += json.data;
+              }
+            } catch (e) {
+              // Игнор
+            }
           }
         }
-      }
-    }
+      });
+
+      response.data.on('end', () => {
+        if (!fullText.trim()) {
+          console.error('❌ Поток завершился, но текст пуст');
+          reject(new Error('Empty response'));
+        } else {
+          console.log('✅ Поток завершён. Текст собран.');
+          resolve();
+        }
+      });
+
+      response.data.on('error', (err) => {
+        console.error('❌ Ошибка потока:', err.message);
+        reject(err);
+      });
+    });
 
     if (!fullText.trim()) {
       console.error('❌ Ответ от Dify пустой');
