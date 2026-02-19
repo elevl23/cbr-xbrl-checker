@@ -31,13 +31,13 @@ async function run() {
     const cleanOld = cleanText(oldText);
     const cleanNew = cleanText(newText);
 
-    // 2. Парсинг на разделы
+    // 2. Парсинг на разделы (с сохранением полного содержания)
     const sectionsOld = parseSections(cleanOld);
-    const sectionsNew = parseSections(cleanNew);
+    const sectionsNew = parseNewSections(cleanNew);
 
     console.log(`✅ Разделы: ${Object.keys(sectionsOld).length} → ${Object.keys(sectionsNew).length}`);
 
-    // 3. Сравнение разделов
+    // 3. Сравнение
     const diff = compareSections(sectionsOld, sectionsNew);
 
     // 4. Формирование финального transcript
@@ -47,7 +47,7 @@ async function run() {
     console.log('📤 Отправка в Dify...');
     await callDify(transcript);
 
-    // 6. Ожидание Gist (как у вас)
+    // 6. Ожидание Gist
     await waitForGist();
 
     console.log('✅ Готово!');
@@ -72,63 +72,77 @@ function cleanText(text) {
   // Удаление номеров страниц (отдельные цифры)
   cleaned = cleaned.replace(/^\s*\d+\s*$/gm, '');
 
-  // Удаление оглавления (по ключевым словам)
+  // Удаление оглавления
   cleaned = cleaned.replace(/Оглавление[\s\S]*?(?=1\.|Глава\s*\d|ВВЕДЕНИЕ)/i, '');
 
   // Удаление лишних пробелов и переносов
   cleaned = cleaned.replace(/\n\s*\n\s*\n/g, '\n\n');
   cleaned = cleaned.replace(/[ \t]+/g, ' ');
 
-  // Удаление URL, дат, версий (нормализация)
+  // Нормализация URL, дат, версий
   cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, '[URL]');
   cleaned = cleaned.replace(/\d{2}\.\d{2}\.\d{4}/g, 'DD.MM.YYYY');
   cleaned = cleaned.replace(/версия\s*[\d.]+/gi, 'версия X.X.X');
-  cleaned = cleaned.replace(/от\s+DD\.MM\.YYYY/gi, 'от DD.MM.YYYY');
 
-  // Удаление пустых строк в начале/конце
   return cleaned.trim();
 }
 
-// === 3. ПАРСИНГ НА РАЗДЕЛЫ ===
+// === 3. ПАРСИНГ РАЗДЕЛОВ (Старая версия) ===
 function parseSections(text) {
   const sections = {};
+  const lines = text.split('\n');
+
+  let currentKey = null;
+  let currentContent = [];
 
   // Паттерны заголовков
   const patterns = [
-    // Порядок: "Глава 1. Общие положения"
-    { regex: /^Глава\s+(\d+)\.\s+(.+?)(?=\n\s*Глава\s+\d+|$)/gims, key: 'chapter-$1' },
-    // Порядок: "1.1", "2.2.3"
-    { regex: /^(\d+(?:\.\d+){0,3})\.\s+(.+?)(?=\n\s*\d+(?:\.\d+){0,3}\.\s+|$)/gims, key: 'section-$1' },
-    // Правила: "2.2.3.", "3.1"
-    { regex: /^(\d+(?:\.\d+)+)\s*[\.\-]\s+(.+?)(?=\n\s*\d+(?:\.\d+)+\s*[\.\-]|$)/gims, key: 'rule-$1' },
-    // Правила: "Приложение 1", "Приложение 2"
-    { regex: /^(Приложение\s+\d+)[\s\S]*?(?=Приложение\s+\d+|$)/gi, key: 'appendix-$1' },
+    /^Глава\s+\d+\./,
+    /^\d+(?:\.\d+){1,3}\./,
+    /^\d+(?:\.\d+){1,3}\s*[\.\-]\s+/
   ];
 
-  for (const { regex, key } of patterns) {
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      const fullMatch = match[0].trim();
-      const header = match[1] || match[2];
-      const sectionKey = key.replace('$1', header);
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
 
-      // Сохраняем чистый заголовок + содержимое
-      const content = fullMatch.replace(/^[^\n]+\n/, '').trim();
-      const title = fullMatch.split('\n')[0].trim();
+    // Проверяем, не начался ли новый раздел
+    const isHeader = patterns.some(p => p.test(line));
 
-      sections[sectionKey] = { title, content, raw: fullMatch };
+    if (isHeader) {
+      // Сохраняем предыдущий раздел
+      if (currentKey) {
+        sections[currentKey] = {
+          title: currentKey,
+          content: currentContent.join('\n').trim()
+        };
+      }
+      // Начинаем новый
+      currentKey = line;
+      currentContent = [];
+    } else {
+      currentContent.push(line);
     }
   }
 
-  // Если ничего не найдено — возвращаем весь текст как один блок
-  if (Object.keys(sections).length === 0) {
-    sections['full'] = { title: 'Полный текст', content: text, raw: text };
+  // Сохраняем последний
+  if (currentKey) {
+    sections[currentKey] = {
+      title: currentKey,
+      content: currentContent.join('\n').trim()
+    };
   }
 
   return sections;
 }
 
-// === 4. СРАВНЕНИЕ РАЗДЕЛОВ ===
+// === 4. ПАРСИНГ РАЗДЕЛОВ (Новая версия) ===
+// Та же логика — для единообразия
+function parseNewSections(text) {
+  return parseSections(text);
+}
+
+// === 5. СРАВНЕНИЕ РАЗДЕЛОВ ===
 function compareSections(oldSec, newSec) {
   const result = {
     added: [],
@@ -147,7 +161,6 @@ function compareSections(oldSec, newSec) {
     } else if (old && !new_) {
       result.removed.push(old);
     } else {
-      // Сравнение по содержимому (игнорируем пробелы/переносы)
       const cleanOld = normalize(old.content);
       const cleanNew = normalize(new_.content);
 
@@ -163,7 +176,7 @@ function compareSections(oldSec, newSec) {
   return result;
 }
 
-// === 5. НОРМАЛИЗАЦИЯ ТЕКСТА ===
+// === 6. НОРМАЛИЗАЦИЯ ДЛЯ СРАВНЕНИЯ ===
 function normalize(text) {
   return text
     .replace(/\s+/g, ' ')
@@ -172,29 +185,29 @@ function normalize(text) {
     .trim();
 }
 
-// === 6. ФОРМАТИРОВАНИЕ ДЛЯ LLM ===
+// === 7. ФОРМАТИРОВАНИЕ ДЛЯ LLM ===
 function formatTranscript(diff, docName) {
   let output = '';
 
-  // Добавленные
-  if (diff.added.length > 0) {
-    output += '### НОВЫЕ РАЗДЕЛЫ\n\n';
-    diff.added.forEach(sec => {
+  // Удалённые
+  if (diff.removed.length > 0) {
+    output += `### УДАЛЁННЫЕ РАЗДЕЛЫ (${docName})\n\n`;
+    diff.removed.forEach(sec => {
       output += `# ${sec.title}\n${sec.content}\n\n`;
     });
   }
 
-  // Удалённые
-  if (diff.removed.length > 0) {
-    output += '### УДАЛЁННЫЕ РАЗДЕЛЫ\n\n';
-    diff.removed.forEach(sec => {
+  // Добавленные
+  if (diff.added.length > 0) {
+    output += `### НОВЫЕ РАЗДЕЛЫ (${docName})\n\n`;
+    diff.added.forEach(sec => {
       output += `# ${sec.title}\n${sec.content}\n\n`;
     });
   }
 
   // Изменённые
   if (diff.changed.length > 0) {
-    output += '### ИЗМЕНЁННЫЕ РАЗДЕЛЫ\n\n';
+    output += `### ИЗМЕНЁННЫЕ РАЗДЕЛЫ (${docName})\n\n`;
     diff.changed.forEach(change => {
       output += `# ${change.old.title}\n\n`;
       output += `**СТАРАЯ ВЕРСИЯ**\n${change.old.content}\n\n`;
@@ -202,14 +215,14 @@ function formatTranscript(diff, docName) {
     });
   }
 
-  if (output === '') {
-    output = `# НИКАКИХ ИЗМЕНЕНИЙ В ДОКУМЕНТЕ "${docName}" НЕ ОБНАРУЖЕНО`;
+  if (!output) {
+    output = `### НИКАКИХ ИЗМЕНЕНИЙ В ДОКУМЕНТЕ "${docName}" НЕ ОБНАРУЖЕНО`;
   }
 
-  return `### СТАРАЯ ВЕРСИЯ (${docName})\n\n${diff.removed.length === 0 && diff.changed.length === 0 ? 'Нет изменений' : ''}\n\n${diff.changed.map(c => `# ${c.old.title}\n${c.old.content}`).join('\n\n')}\n\n${diff.removed.map(r => `# ${r.title}\n${r.content}`).join('\n\n')}\n\n### НОВАЯ ВЕРСИЯ (${docName})\n\n${diff.added.length === 0 && diff.changed.length === 0 ? 'Нет изменений' : ''}\n\n${diff.changed.map(c => `# ${c.new.title}\n${c.new.content}`).join('\n\n')}\n\n${diff.added.map(a => `# ${a.title}\n${a.content}`).join('\n\n')}`;
+  return `### СТАРАЯ ВЕРСИЯ (${docName})\n\n${diff.removed.map(r => `# ${r.title}\n${r.content}`).join('\n\n')}\n\n### НОВАЯ ВЕРСИЯ (${docName})\n\n${diff.added.map(a => `# ${a.title}\n${a.content}`).join('\n\n')}\n\n${diff.changed.map(c => `# ${c.new.title}\n${c.new.content}`).join('\n\n')}`;
 }
 
-// === 7. ВЫЗОВ DIFY ===
+// === 8. ВЫЗОВ DIFY ===
 async function callDify(transcript) {
   try {
     await axios.post(
@@ -237,7 +250,7 @@ async function callDify(transcript) {
   }
 }
 
-// === 8. ОЖИДАНИЕ GIST (как у вас) ===
+// === 9. ОЖИДАНИЕ GIST ===
 async function waitForGist() {
   console.log('⏳ Ожидание Gist...');
   for (let i = 0; i < 90; i++) {
