@@ -1,50 +1,46 @@
 // pages/api/dify-file.js
-import { NextResponse } from 'next/server';
 import axios from 'axios';
 
 export default async function handler(req, res) {
-  // Обработка OPTIONS (CORS preflight)
   if (req.method === 'OPTIONS') {
-    return res.status(200).json({});
+    return res.status(200).end();
   }
-
-  // Разрешаем только POST
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Метод не разрешён' });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const { markdown_output } = req.body;
 
-    // === 1. Извлекаем file_url из sys ===
+    console.log('📥 Получено в markdown_output:', JSON.stringify(markdown_output, null, 2));
+
     const file = markdown_output?.files?.[0];
     if (!file) {
       return res.status(400).json({ error: 'Файл не найден в output' });
     }
 
     const file_url = file.url;
-    const filename = file.filename || 'comparison.md';
-
     if (!file_url) {
       return res.status(400).json({ error: 'URL файла отсутствует' });
     }
 
-    // === 2. Скачиваем содержимое файла ===
+    // Скачиваем .md как текст
     const fileRes = await axios.get(file_url, {
       responseType: 'text',
       timeout: 30000,
     });
 
     const content = fileRes.data;
+    const filename = file.filename || 'comparison.md';
 
-    // === 3. Сохраняем в Gist ===
+    // Загружаем в Gist
     const gist = await axios.post(
       'https://api.github.com/gists',
       {
-        description: `Сравнение PDF — ${markdown_output.workflow_id}`,
+        description: `Сравнение PDF — ${markdown_output.workflow_id || 'unknown'}`,
         public: true,
         files: {
-          [`pdf-comparison-${markdown_output.timestamp}.md`]: {
+          [`pdf-comparison-${Date.now()}.md`]: {
             content,
           },
         },
@@ -60,6 +56,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       gist_url: gist.data.html_url,
+      raw_url: gist.data.files[Object.keys(gist.data.files)[0]].raw_url,
       size: content.length,
       filename,
     });
