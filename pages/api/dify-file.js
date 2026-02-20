@@ -39,7 +39,7 @@ export default async function handler(req, res) {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+          Authorization: `Bearer ${process.env.GH_TOKEN}`,
           'Content-Type': 'application/json'
         }
       }
