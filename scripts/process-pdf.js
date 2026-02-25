@@ -15,6 +15,16 @@ if (!DIFY_API_KEY || !GITHUB_TOKEN || !NAME || !OLD_URL || !NEW_URL) {
   process.exit(1);
 }
 
+// === НАСТРОЙКИ ОГРАНИЧЕНИЙ ===
+// 🔧 Настрой здесь максимальное количество символов, отправляемых в Dify
+// 
+// Варианты:
+//   MAX_CHARS = 10000   → обрезать до 10 000 символов
+//   MAX_CHARS = 0        → отправлять всё, без ограничений
+//   MAX_CHARS = 32768    → максимум для некоторых LLM
+//
+const MAX_CHARS = 40000; // ⚙️ Меняй это значение по необходимости
+
 // === ОСНОВНОЙ СКРИПТ ===
 async function run() {
   try {
@@ -31,7 +41,7 @@ async function run() {
     const cleanOld = cleanText(oldText);
     const cleanNew = cleanText(newText);
 
-    // 2. Парсинг на разделы (с сохранением полного содержания)
+    // 2. Парсинг на разделы
     const sectionsOld = parseSections(cleanOld);
     const sectionsNew = parseNewSections(cleanNew);
 
@@ -41,13 +51,23 @@ async function run() {
     const diff = compareSections(sectionsOld, sectionsNew);
 
     // 4. Формирование финального transcript
-    const transcript = formatTranscript(diff, NAME);
+    const fullTranscript = formatTranscript(diff, NAME);
+    console.log(`📝 Полный размер transcript: ${fullTranscript.length} символов`);
 
-    // 5. Отправка в Dify
+    // 5. Ограничение по символам
+    const transcript = MAX_CHARS > 0 && fullTranscript.length > MAX_CHARS
+      ? truncateText(fullTranscript, MAX_CHARS)
+      : fullTranscript;
+
+    if (MAX_CHARS > 0 && fullTranscript.length > MAX_CHARS) {
+      console.log(`✂️  Обрезано до ${MAX_CHARS} символов`);
+    }
+
+    // 6. Отправка в Dify
     console.log('📤 Отправка в Dify...');
     await callDify(transcript);
 
-    // 6. Ожидание Gist
+    // 7. Ожидание Gist
     await waitForGist();
 
     console.log('✅ Готово!');
@@ -137,7 +157,6 @@ function parseSections(text) {
 }
 
 // === 4. ПАРСИНГ РАЗДЕЛОВ (Новая версия) ===
-// Та же логика — для единообразия
 function parseNewSections(text) {
   return parseSections(text);
 }
@@ -222,7 +241,22 @@ function formatTranscript(diff, docName) {
   return `### СТАРАЯ ВЕРСИЯ (${docName})\n\n${diff.removed.map(r => `# ${r.title}\n${r.content}`).join('\n\n')}\n\n### НОВАЯ ВЕРСИЯ (${docName})\n\n${diff.added.map(a => `# ${a.title}\n${a.content}`).join('\n\n')}\n\n${diff.changed.map(c => `# ${c.new.title}\n${c.new.content}`).join('\n\n')}`;
 }
 
-// === 8. ВЫЗОВ DIFY ===
+// === 8. ОБРЕЗКА ТЕКСТА ПО СЛОВАМ ===
+function truncateText(text, maxChars) {
+  if (text.length <= maxChars) return text;
+
+  // Обрезаем по символам, но до последнего пробела
+  let truncated = text.slice(0, maxChars);
+  const lastSpace = truncated.lastIndexOf(' ');
+  if (lastSpace > 0) {
+    truncated = truncated.slice(0, lastSpace);
+  }
+
+  // Добавляем индикатор
+  return truncated + '\n\n[... обрезано по ограничению в ' + maxChars + ' символов]';
+}
+
+// === 9. ВЫЗОВ DIFY ===
 async function callDify(transcript) {
   try {
     await axios.post(
@@ -250,7 +284,7 @@ async function callDify(transcript) {
   }
 }
 
-// === 9. ОЖИДАНИЕ GIST ===
+// === 10. ОЖИДАНИЕ GIST ===
 async function waitForGist() {
   console.log('⏳ Ожидание Gist...');
   for (let i = 0; i < 90; i++) {
