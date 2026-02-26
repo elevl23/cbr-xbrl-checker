@@ -6,9 +6,6 @@ import * as cheerio from 'cheerio';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// === GITHUB ===
-const GITHUB_TOKEN = process.env.GH_TOKEN;
-
 // === ОТПРАВКА В TELEGRAM ===
 async function sendToTelegram(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
@@ -39,6 +36,7 @@ export default async function handler(req, res) {
   try {
     console.log('🔍 Запуск проверки обновлений ЦБ...');
 
+    // 1. Парсим страницу ЦБ
     const response = await axios.get('https://www.cbr.ru/projects_xbrl/taxonomy_xbrl/xbrl-csv', {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CBR-Checker/1.0)' },
       timeout: 10000,
@@ -100,6 +98,7 @@ export default async function handler(req, res) {
       }
     });
 
+    // 2. Читаем предыдущее состояние
     let previous = {};
     try {
       const prevRes = await axios.get('https://raw.githubusercontent.com/elevl23/cbr-xbrl-checker/main/last-check.json');
@@ -108,6 +107,7 @@ export default async function handler(req, res) {
       console.log('⚠️ last-check.json не найден — первая проверка');
     }
 
+    // 3. Сравнение
     const updates = [];
 
     const checkUpdate = (key, current, previous) => {
@@ -169,11 +169,10 @@ ${updateText}
 ⏱ <i>${new Date().toLocaleString('ru-RU')}</i>
       `.trim());
 
-      // === ЗАПУСК PDF-COMPARE В ФОНЕ ===
+      // === ЗАПУСК pdf-compare В ФОНЕ ===
       const orderUpdate = updates.find(u => u.file === 'order' && u.type === 'updated');
       if (orderUpdate) {
         console.log('🔄 Запуск pdf-compare в фоне...');
-        // Не ждём — просто отправляем
         fetch('/api/pdf-compare', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -184,39 +183,8 @@ ${updateText}
       }
     }
 
-    // === ОБНОВЛЕНИЕ last-check.json ===
-    if (new_update_available && GITHUB_TOKEN) {
-      try {
-        const repo = 'elevl23/cbr-xbrl-checker';
-        const path = 'last-check.json';
-        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-
-        const getRes = await axios.get(url, {
-          headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
-        });
-        const sha = getRes.data.sha;
-
-        await axios.put(
-          url,
-          {
-            message: `🤖 Автообновление: обнаружены изменения ${new Date().toISOString()}`,
-            content: Buffer.from(JSON.stringify({ files: current }, null, 2)).toString('base64'),
-            sha,
-            branch: 'main'
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${GITHUB_TOKEN}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        console.log('✅ last-check.json обновлён');
-      } catch (err) {
-        console.error('❌ Ошибка при обновлении last-check.json:', err.message);
-      }
-    }
+    // ✅ Убрали обновление last-check.json — чтобы не было таймаута
+    // ✅ Пусть pdf-compare делает это позже
 
     return NextResponse.json({
       files: current,
