@@ -173,14 +173,17 @@ ${updateText}
       // Запуск pdf-compare в фоне
       const orderUpdate = updates[0];
       console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
-      fetch('/api/pdf-compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates: [orderUpdate] })
+
+      // Используем полный URL
+      const PDF_COMPARE_URL = 'https://cbr-xbrl-checker.vercel.app/api/pdf-compare';
+
+      fetch(PDF_COMPARE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates: [orderUpdate] })
       }).catch(err => {
-        console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
+      console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
       });
-    }
 
     // 5. Обновляем last-check.json: сохраняем ВСЕ старые и новый URL
     if (new_update_available && GITHUB_TOKEN) {
