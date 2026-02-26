@@ -7,7 +7,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 // === GITHUB ===
-const GITHUB_TOKEN = process.env.GH_TOKEN; // используем GH_TOKEN
+const GITHUB_TOKEN = process.env.GH_TOKEN;
 
 // === ОТПРАВКА В TELEGRAM ===
 async function sendToTelegram(message) {
@@ -39,7 +39,6 @@ export default async function handler(req, res) {
   try {
     console.log('🔍 Запуск проверки обновлений ЦБ...');
 
-    // 1. Парсим страницу ЦБ
     const response = await axios.get('https://www.cbr.ru/projects_xbrl/taxonomy_xbrl/xbrl-csv', {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CBR-Checker/1.0)' },
       timeout: 10000,
@@ -79,7 +78,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // === ОПРЕДЕЛЕНИЕ "ПОРЯДКА" ПО НАЗВАНИЮ И URL ===
       const lowerText = text.toLowerCase();
       const lowerUrl = url.toLowerCase();
 
@@ -102,7 +100,6 @@ export default async function handler(req, res) {
       }
     });
 
-    // 2. Читаем предыдущее состояние
     let previous = {};
     try {
       const prevRes = await axios.get('https://raw.githubusercontent.com/elevl23/cbr-xbrl-checker/main/last-check.json');
@@ -111,7 +108,6 @@ export default async function handler(req, res) {
       console.log('⚠️ last-check.json не найден — первая проверка');
     }
 
-    // 3. Сравнение
     const updates = [];
 
     const checkUpdate = (key, current, previous) => {
@@ -148,14 +144,13 @@ export default async function handler(req, res) {
       }
     };
 
-    if (current.taxonomy) checkUpdate('taxonomy', current, previous);
     if (current.order) checkUpdate('order', current, previous);
+    if (current.taxonomy) checkUpdate('taxonomy', current, previous);
     if (current.materials) checkUpdate('materials', current, previous);
     if (current.guidelines) checkUpdate('guidelines', current, previous);
 
     const new_update_available = updates.length > 0;
 
-    // 4. УВЕДОМЛЕНИЕ В TELEGRAM
     if (new_update_available) {
       console.log(`🎉 Найдено обновлений: ${updates.length}`);
 
@@ -174,24 +169,22 @@ ${updateText}
 ⏱ <i>${new Date().toLocaleString('ru-RU')}</i>
       `.trim());
 
-      // 5. ЗАПУСК СРАВНЕНИЯ PDF (если обновился "Порядок")
+      // === ЗАПУСК PDF-COMPARE В ФОНЕ ===
       const orderUpdate = updates.find(u => u.file === 'order' && u.type === 'updated');
       if (orderUpdate) {
-        console.log('🔄 Запуск сравнения PDF...');
-        try {
-          await fetch('/api/pdf-compare', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ updates: [orderUpdate] })
-          });
-          console.log('✅ Запрос на сравнение отправлен');
-        } catch (err) {
-          console.error('❌ Ошибка при запуске сравнения:', err.message);
-        }
+        console.log('🔄 Запуск pdf-compare в фоне...');
+        // Не ждём — просто отправляем
+        fetch('/api/pdf-compare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updates: [orderUpdate] })
+        }).catch(err => {
+          console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
+        });
       }
     }
 
-    // 6. ОБНОВЛЕНИЕ last-check.json В GITHUB
+    // === ОБНОВЛЕНИЕ last-check.json ===
     if (new_update_available && GITHUB_TOKEN) {
       try {
         const repo = 'elevl23/cbr-xbrl-checker';
@@ -219,15 +212,12 @@ ${updateText}
           }
         );
 
-        console.log('✅ last-check.json обновлён в GitHub');
+        console.log('✅ last-check.json обновлён');
       } catch (err) {
         console.error('❌ Ошибка при обновлении last-check.json:', err.message);
       }
-    } else if (new_update_available) {
-      console.log('⚠️ GH_TOKEN не задан — не могу обновить last-check.json');
     }
 
-    // 7. Ответ
     return NextResponse.json({
       files: current,
       updates,
@@ -237,10 +227,7 @@ ${updateText}
   } catch (error) {
     console.error('❌ Ошибка:', error.message);
     return NextResponse.json(
-      {
-        error: 'Не удалось получить данные',
-        message: error.message
-      },
+      { error: 'Не удалось получить данные', message: error.message },
       { status: 500 }
     );
   }
