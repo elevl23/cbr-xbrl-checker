@@ -1,43 +1,13 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { parse } from 'pdf-parse';
 
 // === TELEGRAM ===
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 // === GITHUB ===
-const GITHUB_TOKEN = process.env.GH_TOKEN;
-
-// === ПРОВЕРКА PDF НА "ПОРЯДОК" ПО СОДЕРЖИМУ ===
-async function isOrderDocument(pdfUrl) {
-  try {
-    const response = await axios.get(pdfUrl, {
-      responseType: 'arraybuffer',
-      timeout: 15000
-    });
-
-    const data = await parse(Buffer.from(response.data));
-    const text = data.text.toLowerCase();
-
-    // Ключевые фразы, характерные для "Порядка"
-    const orderPhrases = [
-      'порядок составления и представления',
-      'в бaнк россии данных внутреннего учета',
-      'профессионального участника рынка ценных бумаг',
-      'брокерскую деятельность',
-      'дилерскую деятельность',
-      'деятельность по управлению ценными бумагами'
-    ];
-
-    const matches = orderPhrases.filter(phrase => text.includes(phrase.toLowerCase()));
-    return matches.length >= 3;
-  } catch (err) {
-    console.error('❌ Ошибка при анализе PDF:', err.message);
-    return false;
-  }
-}
+const GITHUB_TOKEN = process.env.GH_TOKEN; // используем GH_TOKEN
 
 // === ОТПРАВКА В TELEGRAM ===
 async function sendToTelegram(message) {
@@ -83,9 +53,6 @@ export default async function handler(req, res) {
       guidelines: null
     };
 
-    // Собираем все PDF
-    const pdfLinks = [];
-
     $('.document-regular').each((i, element) => {
       const $el = $(element);
       const $link = $el.find('a[href]');
@@ -112,30 +79,28 @@ export default async function handler(req, res) {
         }
       }
 
-      pdfLinks.push({ name: text, url, version, date });
+      // === ОПРЕДЕЛЕНИЕ "ПОРЯДКА" ПО НАЗВАНИЮ И URL ===
+      const lowerText = text.toLowerCase();
+      const lowerUrl = url.toLowerCase();
+
+      const isOrder =
+        lowerText.includes('порядок составления и представления') ||
+        lowerText.includes('порядок составления') ||
+        lowerText.includes('порядок') ||
+        lowerUrl.includes('inf_note') ||
+        lowerUrl.includes('poryadok') ||
+        lowerUrl.includes('order');
+
+      if (isOrder) {
+        current.order = { name: text, url, version, date };
+      } else if (text.includes('Финальная таксономия')) {
+        current.taxonomy = { name: text, url, version, date };
+      } else if (text.includes('Сопроводительные материалы')) {
+        current.materials = { name: text, url, version, date };
+      } else if (text.includes('Методические рекомендации')) {
+        current.guidelines = { name: text, url, version, date };
+      }
     });
-
-    // Определяем "Порядок" по содержимому
-    for (const link of pdfLinks) {
-      if (await isOrderDocument(link.url)) {
-        current.order = link;
-        console.log('✅ Найден документ "Порядок":', link.name);
-        break;
-      }
-    }
-
-    // Остальные файлы по названию
-    for (const link of pdfLinks) {
-      if (link.url === current.order?.url) continue;
-
-      if (link.name.includes('Финальная таксономия')) {
-        current.taxonomy = link;
-      } else if (link.name.includes('Сопроводительные материалы')) {
-        current.materials = link;
-      } else if (link.name.includes('Методические рекомендации')) {
-        current.guidelines = link;
-      }
-    }
 
     // 2. Читаем предыдущее состояние
     let previous = {};
@@ -233,13 +198,11 @@ ${updateText}
         const path = 'last-check.json';
         const url = `https://api.github.com/repos/${repo}/contents/${path}`;
 
-        // Получаем SHA
         const getRes = await axios.get(url, {
           headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
         });
         const sha = getRes.data.sha;
 
-        // Обновляем файл
         await axios.put(
           url,
           {
@@ -261,7 +224,7 @@ ${updateText}
         console.error('❌ Ошибка при обновлении last-check.json:', err.message);
       }
     } else if (new_update_available) {
-      console.log('⚠️ GITHUB_TOKEN не задан — не могу обновить last-check.json');
+      console.log('⚠️ GH_TOKEN не задан — не могу обновить last-check.json');
     }
 
     // 7. Ответ
