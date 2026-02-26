@@ -30,25 +30,33 @@ async function sendToTelegram(message) {
 // === ОСНОВНОЙ ОБРАБОТЧИК ===
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
+    console.log('❌ Метод не GET — завершаем');
     return NextResponse.json({ error: 'Метод не поддерживается' }, { status: 405 });
   }
 
   try {
-    console.log('🔍 Запуск проверки обновлений ЦБ...');
+    console.log('🔍 Этап 1: Запуск проверки обновлений ЦБ...');
 
     // 1. Парсим страницу ЦБ
+    console.log('🔄 Этап 2: Запрос к cbr.ru...');
     const response = await axios.get('https://www.cbr.ru/projects_xbrl/taxonomy_xbrl/xbrl-csv', {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CBR-Checker/1.0)' },
       timeout: 10000,
     });
+    console.log('✅ Этап 2: Ответ от cbr.ru получен, длина:', response.data.length);
 
     const $ = cheerio.load(response.data);
+    console.log('✅ Этап 3: Страница успешно распаршена');
+
     const current = {
       taxonomy: null,
       order: null,
       materials: null,
       guidelines: null
     };
+
+    let pdfCount = 0;
+    console.log('🔄 Этап 4: Поиск PDF-документов...');
 
     $('.document-regular').each((i, element) => {
       const $el = $(element);
@@ -58,13 +66,12 @@ export default async function handler(req, res) {
 
       if (!href || !href.includes('.pdf')) return;
 
+      pdfCount++;
       const url = new URL(href, 'https://www.cbr.ru').href;
 
       let version = null;
       const versionMatch = text.match(/версия\s*([\d.]+)/i);
-      if (versionMatch) {
-        version = versionMatch[1];
-      }
+      if (versionMatch) version = versionMatch[1];
 
       let date = null;
       const $dateEl = $el.find('.document-regular_date');
@@ -89,6 +96,7 @@ export default async function handler(req, res) {
 
       if (isOrder) {
         current.order = { name: text, url, version, date };
+        console.log('✅ Найден документ "Порядок":', text);
       } else if (text.includes('Финальная таксономия')) {
         current.taxonomy = { name: text, url, version, date };
       } else if (text.includes('Сопроводительные материалы')) {
@@ -98,16 +106,24 @@ export default async function handler(req, res) {
       }
     });
 
+    console.log('✅ Этап 4: Найдено PDF:', pdfCount);
+    console.log('📊 Текущие документы:', JSON.stringify(current, null, 2));
+
     // 2. Читаем предыдущее состояние
     let previous = {};
     try {
-      const prevRes = await axios.get('https://raw.githubusercontent.com/elevl23/cbr-xbrl-checker/main/last-check.json');
+      console.log('🔄 Этап 5: Загрузка last-check.json...');
+      const prevRes = await axios.get('https://raw.githubusercontent.com/elevl23/cbr-xbrl-checker/main/last-check.json', {
+        timeout: 10000
+      });
       previous = prevRes.data.files || {};
+      console.log('✅ Этап 5: last-check.json загружен');
     } catch (err) {
-      console.log('⚠️ last-check.json не найден — первая проверка');
+      console.log('⚠️ Этап 5: last-check.json не найден — первая проверка');
     }
 
     // 3. Сравнение
+    console.log('🔄 Этап 6: Сравнение версий...');
     const updates = [];
 
     const checkUpdate = (key, current, previous) => {
@@ -150,9 +166,10 @@ export default async function handler(req, res) {
     if (current.guidelines) checkUpdate('guidelines', current, previous);
 
     const new_update_available = updates.length > 0;
+    console.log('✅ Этап 6: Сравнение завершено. Найдено обновлений:', updates.length);
 
     if (new_update_available) {
-      console.log(`🎉 Найдено обновлений: ${updates.length}`);
+      console.log('🎉 Этап 7: Есть обновления! Отправляем в Telegram...');
 
       const updateText = updates.map(u => {
         if (u.type === 'new') {
@@ -169,10 +186,10 @@ ${updateText}
 ⏱ <i>${new Date().toLocaleString('ru-RU')}</i>
       `.trim());
 
-      // === ЗАПУСК pdf-compare В ФОНЕ ===
+      // Запуск pdf-compare в фоне
       const orderUpdate = updates.find(u => u.file === 'order' && u.type === 'updated');
       if (orderUpdate) {
-        console.log('🔄 Запуск pdf-compare в фоне...');
+        console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
         fetch('/api/pdf-compare', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -184,7 +201,7 @@ ${updateText}
     }
 
     // ✅ Убрали обновление last-check.json — чтобы не было таймаута
-    // ✅ Пусть pdf-compare делает это позже
+    console.log('✅ Этап 9: Ответ отправлен. Проверка завершена.');
 
     return NextResponse.json({
       files: current,
@@ -193,7 +210,8 @@ ${updateText}
       last_updated: new Date().toISOString().split('T')[0]
     });
   } catch (error) {
-    console.error('❌ Ошибка:', error.message);
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА:', error.message);
+    console.error('📋 Стек ошибки:', error.stack);
     return NextResponse.json(
       { error: 'Не удалось получить данные', message: error.message },
       { status: 500 }
