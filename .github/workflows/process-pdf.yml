@@ -27,9 +27,7 @@ jobs:
 
       - name: Run PDF comparison
         run: node scripts/process-pdf.js
-
-      # Передаём в переменные окружения
-      env:
-        INPUT_NAME: ${{ github.event.client_payload.name }}
-        INPUT_OLD_URL: ${{ github.event.client_payload.old_url }}
-        INPUT_NEW_URL: ${{ github.event.client_payload.new_url }}
+        env:
+          INPUT_NAME: ${{ github.event.client_payload.name }}
+          INPUT_OLD_URL: ${{ github.event.client_payload.old_url }}
+          INPUT_NEW_URL: ${{ github.event.client_payload.new_url }}
