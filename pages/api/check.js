@@ -6,6 +6,9 @@ import * as cheerio from 'cheerio';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// === GITHUB ===
+const GITHUB_TOKEN = process.env.GH_TOKEN;
+
 // === ОТПРАВКА В TELEGRAM ===
 async function sendToTelegram(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
@@ -46,17 +49,15 @@ export default async function handler(req, res) {
     console.log('✅ Этап 2: Ответ от cbr.ru получен, длина:', response.data.length);
 
     const $ = cheerio.load(response.data);
-    console.log('✅ Этап 3: Страница успешно распаршена');
+    console.log('✅ Этап 3: Страница распаршена');
 
-    const current = {
-      taxonomy: null,
-      order: null,
-      materials: null,
-      guidelines: null
-    };
+    // 2. Собираем ВСЕ "Порядки"
+    const allOrderLinks = [];
+    const allTaxonomies = [];
+    const allMaterials = [];
+    const allGuidelines = [];
 
-    let pdfCount = 0;
-    console.log('🔄 Этап 4: Поиск PDF-документов...');
+    console.log('🔄 Этап 4: Поиск всех PDF-документов...');
 
     $('.document-regular').each((i, element) => {
       const $el = $(element);
@@ -66,7 +67,6 @@ export default async function handler(req, res) {
 
       if (!href || !href.includes('.pdf')) return;
 
-      pdfCount++;
       const url = new URL(href, 'https://www.cbr.ru').href;
 
       let version = null;
@@ -95,123 +95,164 @@ export default async function handler(req, res) {
         lowerUrl.includes('order');
 
       if (isOrder) {
-        current.order = { name: text, url, version, date };
-        console.log('✅ Найден документ "Порядок":', text);
+        allOrderLinks.push({ name: text, url, version, date });
       } else if (text.includes('Финальная таксономия')) {
-        current.taxonomy = { name: text, url, version, date };
+        allTaxonomies.push({ name: text, url, version, date });
       } else if (text.includes('Сопроводительные материалы')) {
-        current.materials = { name: text, url, version, date };
+        allMaterials.push({ name: text, url, version, date });
       } else if (text.includes('Методические рекомендации')) {
-        current.guidelines = { name: text, url, version, date };
+        allGuidelines.push({ name: text, url, version, date });
       }
     });
 
-    console.log('✅ Этап 4: Найдено PDF:', pdfCount);
-    console.log('📊 Текущие документы:', JSON.stringify(current, null, 2));
+    console.log('✅ Этап 4: Найдено PDF:', {
+      orders: allOrderLinks.length,
+      taxonomies: allTaxonomies.length,
+      materials: allMaterials.length,
+      guidelines: allGuidelines.length
+    });
 
-    // 2. Читаем предыдущее состояние
-    let previous = {};
+    // 3. Читаем историю
+    let history = {};
     try {
       console.log('🔄 Этап 5: Загрузка last-check.json...');
       const prevRes = await axios.get('https://raw.githubusercontent.com/elevl23/cbr-xbrl-checker/main/last-check.json', {
         timeout: 10000
       });
-      previous = prevRes.data.files || {};
-      console.log('✅ Этап 5: last-check.json загружен');
+      history = prevRes.data.files || {};
     } catch (err) {
       console.log('⚠️ Этап 5: last-check.json не найден — первая проверка');
     }
 
-    // 3. Сравнение
-    console.log('🔄 Этап 6: Сравнение версий...');
-    const updates = [];
+    // Извлекаем все старые URL "Порядка"
+    const knownOrderUrls = new Set();
+    if (Array.isArray(history.all_order_urls)) {
+      history.all_order_urls.forEach(url => knownOrderUrls.add(url));
+    } else if (history.order && history.order.url) {
+      knownOrderUrls.add(history.order.url);
+    }
 
-    const checkUpdate = (key, current, previous) => {
-      const curr = current[key];
-      const prev = previous[key];
+    console.log('📊 Известные URL "Порядка":', Array.from(knownOrderUrls));
 
-      if (!prev && curr) {
-        updates.push({
-          type: 'new',
-          file: key,
-          name: curr.name,
-          url: curr.url,
-          version: curr.version,
-          date: curr.date
-        });
-      } else if (prev && curr) {
-        const versionChanged = curr.version && prev.version && curr.version !== prev.version;
-        const dateChanged = curr.date && prev.date && curr.date !== prev.date;
-
-        if (versionChanged || dateChanged) {
-          updates.push({
-            type: 'updated',
-            file: key,
-            name: curr.name,
-            url: curr.url,
-            version: { from: prev.version, to: curr.version },
-            date: { from: prev.date, to: curr.date },
-            urls: {
-              old_url: prev.url,
-              new_url: curr.url
-            }
-          });
+    // 4. Ищем новые
+    const newOrderUpdates = allOrderLinks
+      .filter(link => !knownOrderUrls.has(link.url))
+      .map(link => ({
+        type: 'updated',
+        file: 'order',
+        name: link.name,
+        url: link.url,
+        version: null,
+        date: link.date,
+        urls: {
+          old_url: Array.from(knownOrderUrls).pop() || null,
+          new_url: link.url
         }
-      }
-    };
+      }));
 
-    if (current.order) checkUpdate('order', current, previous);
-    if (current.taxonomy) checkUpdate('taxonomy', current, previous);
-    if (current.materials) checkUpdate('materials', current, previous);
-    if (current.guidelines) checkUpdate('guidelines', current, previous);
+    console.log('✅ Этап 6: Найдено новых "Порядков":', newOrderUpdates.length);
+
+    const updates = newOrderUpdates;
 
     const new_update_available = updates.length > 0;
-    console.log('✅ Этап 6: Сравнение завершено. Найдено обновлений:', updates.length);
 
     if (new_update_available) {
       console.log('🎉 Этап 7: Есть обновления! Отправляем в Telegram...');
 
       const updateText = updates.map(u => {
-        if (u.type === 'new') {
-          return `🆕 <b>Новый документ</b>: ${u.name}\n🔗 <a href="${u.url}">Скачать</a>`;
-        } else {
-          return `🔄 <b>Обновлён</b>: ${u.name}\n${u.version ? `🔖 ${u.version.from} → ${u.version.to}` : ''}\n📅 ${u.date?.from} → ${u.date?.to}\n🔗 <a href="${u.url}">Скачать</a>`;
-        }
+        return `🆕 <b>Новый документ "Порядок"</b>\n📄 ${u.name}\n🔗 <a href="${u.url}">Скачать</a>`;
       }).join('\n\n');
 
       await sendToTelegram(`
-🚨 <b>Обнаружено обновление на сайте ЦБ</b>
+🚨 <b>Обнаружено новое издание "Порядка"</b>
 
 ${updateText}
 ⏱ <i>${new Date().toLocaleString('ru-RU')}</i>
       `.trim());
 
       // Запуск pdf-compare в фоне
-      const orderUpdate = updates.find(u => u.file === 'order' && u.type === 'updated');
-      if (orderUpdate) {
-        console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
-        fetch('/api/pdf-compare', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updates: [orderUpdate] })
-        }).catch(err => {
-          console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
+      const orderUpdate = updates[0];
+      console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
+      fetch('/api/pdf-compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: [orderUpdate] })
+      }).catch(err => {
+        console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
+      });
+    }
+
+    // 5. Обновляем last-check.json: сохраняем ВСЕ старые и новый URL
+    if (new_update_available && GITHUB_TOKEN) {
+      console.log('🔄 Этап 9: Обновление last-check.json...');
+
+      const newAllUrls = Array.from(knownOrderUrls);
+      newOrderUpdates.forEach(u => {
+        if (!newAllUrls.includes(u.url)) {
+          newAllUrls.push(u.url);
+        }
+      });
+
+      const updatedFiles = {
+        all_order_urls: newAllUrls,
+        order: {
+          name: newOrderUpdates[0].name,
+          url: newOrderUpdates[0].url,
+          date: newOrderUpdates[0].date
+        },
+        taxonomies: allTaxonomies,
+        materials: allMaterials,
+        guidelines: allGuidelines
+      };
+
+      try {
+        const repo = 'elevl23/cbr-xbrl-checker';
+        const path = 'last-check.json';
+        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+        const getRes = await axios.get(url, {
+          headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
         });
+        const sha = getRes.data.sha;
+
+        await axios.put(
+          url,
+          {
+            message: `✅ Автообновление: найден новый "Порядок" ${new Date().toISOString()}`,
+            content: Buffer.from(JSON.stringify({ files: updatedFiles }, null, 2)).toString('base64'),
+            sha,
+            branch: 'main'
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${GITHUB_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        console.log('✅ Этап 9: last-check.json обновлён');
+      } catch (err) {
+        console.error('❌ Ошибка при обновлении last-check.json:', err.message);
       }
     }
 
-    // ✅ Убрали обновление last-check.json — чтобы не было таймаута
-    console.log('✅ Этап 9: Ответ отправлен. Проверка завершена.');
+    console.log('✅ Этап 10: Проверка завершена.');
 
     return NextResponse.json({
-      files: current,
+      files: {
+        orders: allOrderLinks,
+        taxonomies: allTaxonomies,
+        materials: allMaterials,
+        guidelines: allGuidelines
+      },
       updates,
       new_update_available,
       last_updated: new Date().toISOString().split('T')[0]
     });
   } catch (error) {
     console.error('❌ КРИТИЧЕСКАЯ ОШИБКА:', error.message);
-    console.error('📋 Стек ошибки:', error.stack);
+    console.error('📋 Стек:', error.stack);
     return NextResponse.json(
       { error: 'Не удалось получить данные', message: error.message },
       { status: 500 }
