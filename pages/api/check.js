@@ -169,28 +169,40 @@ ${updateText}
 ⏱ <i>${new Date().toLocaleString('ru-RU')}</i>
       `.trim());
 
-      // === ЗАПУСК pdf-compare ВНУТРИ Vercel ===
-      console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
-      const orderUpdate = updates[0];
-      const PDF_COMPARE_URL = 'https://cbr-xbrl-checker.vercel.app/api/pdf-compare';
+      // === ЗАПУСК GitHub Action process-pdf.yml ===
+console.log('🔄 Этап 8: Запуск GitHub Action process-pdf.yml...');
+const orderUpdate = updates[0];
 
-      // 🔍 Логируем перед отправкой
-      console.log('🔍 Подготовка к запуску pdf-compare...');
-      console.log('📥 orderUpdate:', JSON.stringify(orderUpdate, null, 2));
+const GITHUB_REPO = 'elevl23/cbr-xbrl-checker';
+const DISPATCH_URL = `https://api.github.com/repos/${GITHUB_REPO}/dispatches`;
 
-      const payload = { updates: [orderUpdate] };
-      console.log('📤 Отправляем payload:', JSON.stringify(payload, null, 2));
-
-      // Используем keepalive для фоновых задач
-      fetch(PDF_COMPARE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        keepalive: true
-      });
-
-      console.log('✅ Запрос на сравнение отправлен (в фоне)');
+try {
+  await axios.post(
+    DISPATCH_URL,
+    {
+      event_type: 'process-pdf-update',
+      client_payload: {
+        name: orderUpdate.name,
+        old_url: orderUpdate.urls.old_url,
+        new_url: orderUpdate.urls.new_url
+      }
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/vnd.github.v3+json'
+      }
     }
+  );
+  console.log('✅ GitHub Action process-pdf.yml запущен');
+} catch (err) {
+  console.error('❌ Ошибка при запуске GitHub Action:', err.message);
+  if (err.response) {
+    console.error('Status:', err.response.status);
+    console.error('Data:', err.response.data);
+  }
+}
 
     // 5. Обновляем last-check.json
     if (new_update_available && GITHUB_TOKEN) {
