@@ -9,7 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DIFY_API_KEY: ${{ secrets.DIFY_API_KEY }}
-      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Checkout code
@@ -24,8 +26,10 @@ jobs:
         run: npm install
 
       - name: Run PDF comparison
-        env:
-          INPUT_NAME: ${{ github.event.client_payload.name }}
-          INPUT_OLD_URL: ${{ github.event.client_payload.old_url }}
-          INPUT_NEW_URL: ${{ github.event.client_payload.new_url }}
         run: node scripts/process-pdf.js
+
+      # Передаём в переменные окружения
+      env:
+        INPUT_NAME: ${{ github.event.client_payload.name }}
+        INPUT_OLD_URL: ${{ github.event.client_payload.old_url }}
+        INPUT_NEW_URL: ${{ github.event.client_payload.new_url }}
