@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '* * * * *'  # 9:00 UTC = 12:00 МСК
   workflow_dispatch:
+    workflow_run:
+    types: completed
 
 jobs:
   check-update:
