@@ -1,0 +1,15 @@
+name: Ежедневная проверка обновлений ЦБ
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # 9:00 UTC = 12:00 МСК
+  workflow_dispatch:
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🧱 Проверка обновлений
+        run: |
+          echo "🔍 Запуск проверки..."
+          curl -s "https://cbr-xbrl-checker.vercel.app/api/check"
