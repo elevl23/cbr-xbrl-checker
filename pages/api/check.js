@@ -142,7 +142,7 @@ export default async function handler(req, res) {
         file: 'order',
         name: link.name,
         url: link.url,
-        version: null,
+        version: link.version,
         date: link.date,
         urls: {
           old_url: Array.from(knownOrderUrls).pop() || null,
@@ -153,7 +153,6 @@ export default async function handler(req, res) {
     console.log('✅ Этап 6: Найдено новых "Порядков":', newOrderUpdates.length);
 
     const updates = newOrderUpdates;
-
     const new_update_available = updates.length > 0;
 
     if (new_update_available) {
@@ -173,19 +172,18 @@ ${updateText}
       // Запуск pdf-compare в фоне
       const orderUpdate = updates[0];
       console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
-
-      // Используем полный URL
       const PDF_COMPARE_URL = 'https://cbr-xbrl-checker.vercel.app/api/pdf-compare';
 
       fetch(PDF_COMPARE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates: [orderUpdate] })
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: [orderUpdate] })
       }).catch(err => {
-      console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
+        console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
       });
+    }
 
-    // 5. Обновляем last-check.json: сохраняем ВСЕ старые и новый URL
+    // 5. Обновляем last-check.json
     if (new_update_available && GITHUB_TOKEN) {
       console.log('🔄 Этап 9: Обновление last-check.json...');
 
