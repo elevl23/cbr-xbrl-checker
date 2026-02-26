@@ -170,39 +170,40 @@ ${updateText}
       `.trim());
 
       // === ЗАПУСК GitHub Action process-pdf.yml ===
-console.log('🔄 Этап 8: Запуск GitHub Action process-pdf.yml...');
-const orderUpdate = updates[0];
+      console.log('🔄 Этап 8: Запуск GitHub Action process-pdf.yml...');
+      const orderUpdate = updates[0];
 
-const GITHUB_REPO = 'elevl23/cbr-xbrl-checker';
-const DISPATCH_URL = `https://api.github.com/repos/${GITHUB_REPO}/dispatches`;
+      const GITHUB_REPO = 'elevl23/cbr-xbrl-checker';
+      const DISPATCH_URL = `https://api.github.com/repos/${GITHUB_REPO}/dispatches`;
 
-try {
-  await axios.post(
-    DISPATCH_URL,
-    {
-      event_type: 'process-pdf-update',
-      client_payload: {
-        name: orderUpdate.name,
-        old_url: orderUpdate.urls.old_url,
-        new_url: orderUpdate.urls.new_url
-      }
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/vnd.github.v3+json'
+      try {
+        await axios.post(
+          DISPATCH_URL,
+          {
+            event_type: 'process-pdf-update',
+            client_payload: {
+              name: orderUpdate.name,
+              old_url: orderUpdate.urls.old_url,
+              new_url: orderUpdate.urls.new_url
+            }
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${GITHUB_TOKEN}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/vnd.github.v3+json'
+            }
+          }
+        );
+        console.log('✅ GitHub Action process-pdf.yml запущен');
+      } catch (err) {
+        console.error('❌ Ошибка при запуске GitHub Action:', err.message);
+        if (err.response) {
+          console.error('Status:', err.response.status);
+          console.error('Data:', err.response.data);
+        }
       }
     }
-  );
-  console.log('✅ GitHub Action process-pdf.yml запущен');
-} catch (err) {
-  console.error('❌ Ошибка при запуске GitHub Action:', err.message);
-  if (err.response) {
-    console.error('Status:', err.response.status);
-    console.error('Data:', err.response.data);
-  }
-}
 
     // 5. Обновляем last-check.json
     if (new_update_available && GITHUB_TOKEN) {
