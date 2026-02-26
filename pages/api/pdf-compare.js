@@ -15,27 +15,18 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Content-Type must be application/json' });
   }
 
-  // === ЧИТАЕМ ТЕЛО ВРУЧНУЮ ===
   let body;
   try {
-    const rawBody = await getRawBody(req);
-    console.log('📄 Тело как строка:', rawBody);
-
-    if (!rawBody) {
-      console.log('❌ Тело пустое');
-      return res.status(400).json({ error: 'Empty body' });
-    }
-
-    body = JSON.parse(rawBody);
-    console.log('✅ JSON.parse() — успешно');
-  } catch (parseErr) {
-    console.error('❌ Ошибка парсинга JSON:', parseErr.message);
+    body = await req.json();
+    console.log('✅ req.json() — успешно');
+  } catch (err) {
+    // ❌ Никакого err.message, чтобы не сломать Vercel
+    console.error('❌ req.json() не удалось');
     return res.status(400).json({ error: 'Invalid JSON' });
   }
 
   console.log('📬 Тело запроса:', JSON.stringify(body, null, 2));
 
-  // === ТЕПЕРЬ ОБРАБАТЫВАЕМ ===
   const { updates } = body;
   if (!updates || !Array.isArray(updates)) {
     console.log('❌ Нет массива updates');
@@ -60,20 +51,4 @@ export default async function handler(req, res) {
   // Пока просто отвечаем
   console.log('✅ pdf-compare: успешно обработан');
   res.status(200).json({ success: true });
-}
-
-// === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ===
-function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', chunk => {
-      data += chunk;
-    });
-    req.on('end', () => {
-      resolve(data);
-    });
-    req.on('error', err => {
-      reject(err);
-    });
-  });
 }
