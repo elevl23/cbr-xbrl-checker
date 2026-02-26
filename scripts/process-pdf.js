@@ -16,15 +16,7 @@ if (!DIFY_API_KEY || !GITHUB_TOKEN || !NAME || !OLD_URL || !NEW_URL) {
 }
 
 // === НАСТРОЙКИ ОГРАНИЧЕНИЙ ===
-// 🔧 Настрой максимальное количество символов, отправляемых в Dify (суммарно для старой + новой)
-//
-// Варианты:
-//   MAX_CHARS = 10000   → обе версии вместе не более 10 000 символов
-//   MAX_CHARS = 0       → без ограничений
-//   MAX_CHARS = 32768   → максимум для GPT-4-turbo и аналогов
-//
-// ⚠️ Внимание: обрезка справедливая — каждая версия получает часть лимита пропорционально своему размеру
-const MAX_CHARS = 40000; // ⚙️ Меняй здесь
+const MAX_CHARS = 40000; // Макс. символов в сумме
 
 // === ОСНОВНОЙ СКРИПТ ===
 async function run() {
@@ -55,7 +47,7 @@ async function run() {
     const fullTranscript = formatTranscript(diff, NAME);
     console.log(`📝 Полный размер transcript: ${fullTranscript.length} символов`);
 
-    // 5. Применяем справедливое обрезание, если нужно
+    // 5. Обрезание (справедливое)
     let transcript;
     if (MAX_CHARS > 0 && fullTranscript.length > MAX_CHARS) {
       console.log(`✂️  Общий лимит ${MAX_CHARS} превышен — применяю справедливое обрезание...`);
@@ -88,37 +80,26 @@ async function pdfToText(url) {
   return data.text;
 }
 
-// === 2. ОЧИСТКА ТЕКСТА ОТ ШУМА ===
+// === 2. ОЧИСТКА ТЕКСТА ===
 function cleanText(text) {
   let cleaned = text;
-
-  // Удаление номеров страниц (отдельные цифры)
   cleaned = cleaned.replace(/^\s*\d+\s*$/gm, '');
-
-  // Удаление оглавления
   cleaned = cleaned.replace(/Оглавление[\s\S]*?(?=1\.|Глава\s*\d|ВВЕДЕНИЕ)/i, '');
-
-  // Удаление лишних пробелов и переносов
   cleaned = cleaned.replace(/\n\s*\n\s*\n/g, '\n\n');
   cleaned = cleaned.replace(/[ \t]+/g, ' ');
-
-  // Нормализация URL, дат, версий
   cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, '[URL]');
   cleaned = cleaned.replace(/\d{2}\.\d{2}\.\d{4}/g, 'DD.MM.YYYY');
   cleaned = cleaned.replace(/версия\s*[\d.]+/gi, 'версия X.X.X');
-
   return cleaned.trim();
 }
 
-// === 3. ПАРСИНГ РАЗДЕЛОВ (Старая версия) ===
+// === 3. ПАРСИНГ РАЗДЕЛОВ ===
 function parseSections(text) {
   const sections = {};
   const lines = text.split('\n');
-
   let currentKey = null;
   let currentContent = [];
 
-  // Паттерны заголовков
   const patterns = [
     /^Глава\s+\d+\./,
     /^\d+(?:\.\d+){1,3}\./,
@@ -129,18 +110,14 @@ function parseSections(text) {
     line = line.trim();
     if (!line) continue;
 
-    // Проверяем, не начался ли новый раздел
     const isHeader = patterns.some(p => p.test(line));
-
     if (isHeader) {
-      // Сохраняем предыдущий раздел
       if (currentKey) {
         sections[currentKey] = {
           title: currentKey,
           content: currentContent.join('\n').trim()
         };
       }
-      // Начинаем новый
       currentKey = line;
       currentContent = [];
     } else {
@@ -148,7 +125,6 @@ function parseSections(text) {
     }
   }
 
-  // Сохраняем последний
   if (currentKey) {
     sections[currentKey] = {
       title: currentKey,
@@ -159,19 +135,13 @@ function parseSections(text) {
   return sections;
 }
 
-// === 4. ПАРСИНГ РАЗДЕЛОВ (Новая версия) ===
 function parseNewSections(text) {
   return parseSections(text);
 }
 
-// === 5. СРАВНЕНИЕ РАЗДЕЛОВ ===
+// === 4. СРАВНЕНИЕ РАЗДЕЛОВ ===
 function compareSections(oldSec, newSec) {
-  const result = {
-    added: [],
-    removed: [],
-    changed: []
-  };
-
+  const result = { added: [], removed: [], changed: [] };
   const allKeys = new Set([...Object.keys(oldSec), ...Object.keys(newSec)]);
 
   for (const key of allKeys) {
@@ -185,12 +155,8 @@ function compareSections(oldSec, newSec) {
     } else {
       const cleanOld = normalize(old.content);
       const cleanNew = normalize(new_.content);
-
       if (cleanOld !== cleanNew) {
-        result.changed.push({
-          old: old,
-          new: new_
-        });
+        result.changed.push({ old, new: new_ });
       }
     }
   }
@@ -198,7 +164,6 @@ function compareSections(oldSec, newSec) {
   return result;
 }
 
-// === 6. НОРМАЛИЗАЦИЯ ДЛЯ СРАВНЕНИЯ ===
 function normalize(text) {
   return text
     .replace(/\s+/g, ' ')
@@ -207,11 +172,10 @@ function normalize(text) {
     .trim();
 }
 
-// === 7. ФОРМАТИРОВАНИЕ ДЛЯ LLM ===
+// === 5. ФОРМАТИРОВАНИЕ ДЛЯ LLM ===
 function formatTranscript(diff, docName) {
   let output = '';
 
-  // Удалённые
   if (diff.removed.length > 0) {
     output += `### УДАЛЁННЫЕ РАЗДЕЛЫ (${docName})\n\n`;
     diff.removed.forEach(sec => {
@@ -219,7 +183,6 @@ function formatTranscript(diff, docName) {
     });
   }
 
-  // Добавленные
   if (diff.added.length > 0) {
     output += `### НОВЫЕ РАЗДЕЛЫ (${docName})\n\n`;
     diff.added.forEach(sec => {
@@ -227,7 +190,6 @@ function formatTranscript(diff, docName) {
     });
   }
 
-  // Изменённые
   if (diff.changed.length > 0) {
     output += `### ИЗМЕНЁННЫЕ РАЗДЕЛЫ (${docName})\n\n`;
     diff.changed.forEach(change => {
@@ -241,60 +203,43 @@ function formatTranscript(diff, docName) {
     output = `### НИКАКИХ ИЗМЕНЕНИЙ В ДОКУМЕНТЕ "${docName}" НЕ ОБНАРУЖЕНО`;
   }
 
+  // 🔥 КЛЮЧЕВОЙ ФРАГМЕНТ: явное разделение старой и новой версии
   return `### СТАРАЯ ВЕРСИЯ (${docName})\n\n${diff.removed.map(r => `# ${r.title}\n${r.content}`).join('\n\n')}\n\n### НОВАЯ ВЕРСИЯ (${docName})\n\n${diff.added.map(a => `# ${a.title}\n${a.content}`).join('\n\n')}\n\n${diff.changed.map(c => `# ${c.new.title}\n${c.new.content}`).join('\n\n')}`;
 }
 
-// === 8. СПРАВЕДЛИВОЕ ОБРЕЗАНИЕ ДВУХ ТЕКСТОВ ===
+// === 6. СПРАВЕДЛИВОЕ ОБРЕЗАНИЕ ===
 function truncateFairly(oldText, newText, maxTotalChars) {
   const total = oldText.length + newText.length;
   if (total <= maxTotalChars) return oldText + '\n\n' + newText;
 
-  // Рассчитываем долю каждой версии
   const oldRatio = oldText.length / total;
   const newRatio = newText.length / total;
-
-  // Минимум 10% каждой версии, если она не пустая
   const minShare = 0.1;
-  let oldShare, newShare;
 
-  if (oldText.length === 0) {
-    oldShare = 0;
-    newShare = 1;
-  } else if (newText.length === 0) {
-    oldShare = 1;
-    newShare = 0;
-  } else {
-    oldShare = Math.max(oldRatio, minShare);
-    newShare = Math.max(newRatio, minShare);
-    // Нормализуем
-    const sum = oldShare + newShare;
-    oldShare = oldShare / sum;
-    newShare = newShare / sum;
-  }
+  let oldShare = Math.max(oldRatio, minShare);
+  let newShare = Math.max(newRatio, minShare);
+  const sum = oldShare + newShare;
+  oldShare /= sum;
+  newShare /= sum;
 
-  // Вычисляем лимиты
   const oldLimit = Math.floor(maxTotalChars * oldShare);
-  const newLimit = maxTotalChars - oldLimit; // чтобы точно не превысить
+  const newLimit = maxTotalChars - oldLimit;
 
-  // Обрезаем по словам
   const truncatedOld = oldText.length > oldLimit ? truncateText(oldText, oldLimit) : oldText;
   const truncatedNew = newText.length > newLimit ? truncateText(newText, newLimit) : newText;
 
   return truncatedOld + '\n\n' + truncatedNew;
 }
 
-// === 9. ОБРЕЗКА ТЕКСТА ПО СЛОВАМ ===
 function truncateText(text, maxChars) {
   if (text.length <= maxChars) return text;
   let truncated = text.slice(0, maxChars);
   const lastSpace = truncated.lastIndexOf(' ');
-  if (lastSpace > 0) {
-    truncated = truncated.slice(0, lastSpace);
-  }
+  if (lastSpace > 0) truncated = truncated.slice(0, lastSpace);
   return truncated + '\n\n[... обрезано до ' + maxChars + ' символов]';
 }
 
-// === 10. ВЫЗОВ DIFY ===
+// === 7. ВЫЗОВ DIFY ===
 async function callDify(transcript) {
   try {
     await axios.post(
@@ -307,7 +252,7 @@ async function callDify(transcript) {
       {
         headers: {
           'Authorization': `Bearer ${DIFY_API_KEY}`,
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         timeout: 120000
       }
@@ -322,7 +267,7 @@ async function callDify(transcript) {
   }
 }
 
-// === 11. ОЖИДАНИЕ GIST ===
+// === 8. ОЖИДАНИЕ GIST ===
 async function waitForGist() {
   console.log('⏳ Ожидание Gist...');
   for (let i = 0; i < 90; i++) {
