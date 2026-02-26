@@ -174,20 +174,23 @@ ${updateText}
       const orderUpdate = updates[0];
       const PDF_COMPARE_URL = 'https://cbr-xbrl-checker.vercel.app/api/pdf-compare';
 
-      // === ЛОГИКА ЗАПУСКА ===
-console.log('🔍 Подготовка к запуску pdf-compare...');
-console.log('📥 Перед отправкой: orderUpdate =', JSON.stringify(orderUpdate, null, 2));
+      // 🔍 Логируем перед отправкой
+      console.log('🔍 Подготовка к запуску pdf-compare...');
+      console.log('📥 orderUpdate:', JSON.stringify(orderUpdate, null, 2));
 
-const payload = { updates: [orderUpdate] };
-console.log('📤 Отправляем:', JSON.stringify(payload, null, 2));
+      const payload = { updates: [orderUpdate] };
+      console.log('📤 Отправляем payload:', JSON.stringify(payload, null, 2));
 
-fetch(PDF_COMPARE_URL, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload)
-});
+      // Используем keepalive для фоновых задач
+      fetch(PDF_COMPARE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+      });
 
-console.log('✅ Запрос на сравнение отправлен (в фоне)');
+      console.log('✅ Запрос на сравнение отправлен (в фоне)');
+    }
 
     // 5. Обновляем last-check.json
     if (new_update_available && GITHUB_TOKEN) {
