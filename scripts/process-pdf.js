@@ -4,7 +4,7 @@ const path = require('path');
 
 // === ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ===
 const DIFY_API_KEY = process.env.DIFY_API_KEY;
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_TOKEN = process.env.GH_TOKEN;
 
 const NAME = process.env.INPUT_NAME;
 const OLD_URL = process.env.INPUT_OLD_URL;
