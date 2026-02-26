@@ -2,7 +2,7 @@ name: Ежедневная проверка обновлений ЦБ
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # 9:00 UTC = 12:00 МСК
+    - cron: '26 8 * * *'  # 9:00 UTC = 12:00 МСК
   workflow_dispatch:
 
 jobs:
