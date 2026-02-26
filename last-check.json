@@ -1,14 +1,17 @@
 {
   "files": {
+    "all_order_urls": [
+      "https://www.cbr.ru/Content/Document/File/172025/inf_note_jan_2425.pdf"
+    ],
+    "order": {
+      "name": "Порядок составления и представления...",
+      "url": "https://www.cbr.ru/Content/Document/File/172025/inf_note_jan_2425.pdf",
+      "date": "2025-01-24"
+    },
     "taxonomy": {
       "name": "Финальная таксономия (версия 6.1.0.5)",
       "url": "https://www.cbr.ru/Content/Document/File/172024/final_6_1_0_5.zip",
       "version": "6.1.0.5",
-      "date": "2025-01-24"
-    },
-    "order": {
-      "name": "Порядок составления и представления...",
-      "url": "https://www.cbr.ru/Content/Document/File/172025/inf_note_jan_2425.pdf",
       "date": "2025-01-24"
     },
     "materials": {
