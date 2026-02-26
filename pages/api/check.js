@@ -8,7 +8,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 // === GITHUB ===
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_TOKEN = process.env.GH_TOKEN;
 
 // === ПРОВЕРКА PDF НА "ПОРЯДОК" ПО СОДЕРЖИМУ ===
 async function isOrderDocument(pdfUrl) {
