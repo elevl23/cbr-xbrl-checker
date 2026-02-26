@@ -142,7 +142,7 @@ export default async function handler(req, res) {
         file: 'order',
         name: link.name,
         url: link.url,
-        version: link.version,
+        version: null,
         date: link.date,
         urls: {
           old_url: Array.from(knownOrderUrls).pop() || null,
@@ -169,72 +169,94 @@ ${updateText}
 ⏱ <i>${new Date().toLocaleString('ru-RU')}</i>
       `.trim());
 
-      // Запуск pdf-compare в фоне
+      // === ЗАПУСК GITHUB ACTION ===
+      console.log('🔄 Этап 8: Запуск GitHub Action process-pdf.yml...');
       const orderUpdate = updates[0];
-      console.log('🔄 Этап 8: Запуск pdf-compare в фоне...');
-      const PDF_COMPARE_URL = 'https://cbr-xbrl-checker.vercel.app/api/pdf-compare';
 
-      fetch(PDF_COMPARE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates: [orderUpdate] })
-      }).catch(err => {
-        console.error('⚠️ Не удалось запустить pdf-compare:', err.message);
-      });
-    }
-
-    // 5. Обновляем last-check.json
-    if (new_update_available && GITHUB_TOKEN) {
-      console.log('🔄 Этап 9: Обновление last-check.json...');
-
-      const newAllUrls = Array.from(knownOrderUrls);
-      newOrderUpdates.forEach(u => {
-        if (!newAllUrls.includes(u.url)) {
-          newAllUrls.push(u.url);
-        }
-      });
-
-      const updatedFiles = {
-        all_order_urls: newAllUrls,
-        order: {
-          name: newOrderUpdates[0].name,
-          url: newOrderUpdates[0].url,
-          date: newOrderUpdates[0].date
-        },
-        taxonomies: allTaxonomies,
-        materials: allMaterials,
-        guidelines: allGuidelines
-      };
+      const GITHUB_REPO = 'elevl23/cbr-xbrl-checker';
+      const DISPATCH_URL = `https://api.github.com/repos/${GITHUB_REPO}/dispatches`;
 
       try {
-        const repo = 'elevl23/cbr-xbrl-checker';
-        const path = 'last-check.json';
-        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-
-        const getRes = await axios.get(url, {
-          headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
-        });
-        const sha = getRes.data.sha;
-
-        await axios.put(
-          url,
+        await axios.post(
+          DISPATCH_URL,
           {
-            message: `✅ Автообновление: найден новый "Порядок" ${new Date().toISOString()}`,
-            content: Buffer.from(JSON.stringify({ files: updatedFiles }, null, 2)).toString('base64'),
-            sha,
-            branch: 'main'
+            event_type: 'process-pdf-update',
+            client_payload: {
+              name: orderUpdate.name,
+              old_url: orderUpdate.urls.old_url,
+              new_url: orderUpdate.urls.new_url
+            }
           },
           {
             headers: {
               Authorization: `Bearer ${GITHUB_TOKEN}`,
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              Accept: 'application/vnd.github.v3+json'
             }
           }
         );
-
-        console.log('✅ Этап 9: last-check.json обновлён');
+        console.log('✅ GitHub Action process-pdf.yml запущен');
       } catch (err) {
-        console.error('❌ Ошибка при обновлении last-check.json:', err.message);
+        console.error('❌ Ошибка при запуске GitHub Action:', err.message);
+        if (err.response) {
+          console.error('Status:', err.response.status);
+          console.error('Data:', err.response.data);
+        }
+      }
+
+      // === ОБНОВЛЕНИЕ last-check.json ===
+      if (GITHUB_TOKEN) {
+        console.log('🔄 Этап 9: Обновление last-check.json...');
+
+        const newAllUrls = Array.from(knownOrderUrls);
+        newOrderUpdates.forEach(u => {
+          if (!newAllUrls.includes(u.url)) {
+            newAllUrls.push(u.url);
+          }
+        });
+
+        const updatedFiles = {
+          all_order_urls: newAllUrls,
+          order: {
+            name: newOrderUpdates[0].name,
+            url: newOrderUpdates[0].url,
+            date: newOrderUpdates[0].date
+          },
+          taxonomies: allTaxonomies,
+          materials: allMaterials,
+          guidelines: allGuidelines
+        };
+
+        try {
+          const repo = 'elevl23/cbr-xbrl-checker';
+          const path = 'last-check.json';
+          const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+          const getRes = await axios.get(url, {
+            headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
+          });
+          const sha = getRes.data.sha;
+
+          await axios.put(
+            url,
+            {
+              message: `✅ Автообновление: найден новый "Порядок" ${new Date().toISOString()}`,
+              content: Buffer.from(JSON.stringify({ files: updatedFiles }, null, 2)).toString('base64'),
+              sha,
+              branch: 'main'
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${GITHUB_TOKEN}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+
+          console.log('✅ Этап 9: last-check.json обновлён');
+        } catch (err) {
+          console.error('❌ Ошибка при обновлении last-check.json:', err.message);
+        }
       }
     }
 
