@@ -16,7 +16,7 @@ if (!DIFY_API_KEY || !GITHUB_TOKEN || !NAME || !OLD_URL || !NEW_URL) {
 }
 
 // === НАСТРОЙКИ ОГРАНИЧЕНИЙ ===
-const MAX_CHARS = 40000; // Макс. символов в сумме
+const MAX_CHARS = 40000; // Максимальное количество символов в сумме
 
 // === ОСНОВНОЙ СКРИПТ ===
 async function run() {
@@ -47,12 +47,12 @@ async function run() {
     const fullTranscript = formatTranscript(diff, NAME);
     console.log(`📝 Полный размер transcript: ${fullTranscript.length} символов`);
 
-    // 5. Обрезание (справедливое)
+    // 5. Обрезание (только если нужно)
     let transcript;
     if (MAX_CHARS > 0 && fullTranscript.length > MAX_CHARS) {
-      console.log(`✂️  Общий лимит ${MAX_CHARS} превышен — применяю справедливое обрезание...`);
-      transcript = truncateFairly(cleanOld, cleanNew, MAX_CHARS);
-      console.log(`✂️  Обрезано: ${transcript.length} символов (суммарно)`);
+      console.log(`✂️  Общий лимит ${MAX_CHARS} превышен — обрезаю fullTranscript...`);
+      transcript = fullTranscript.slice(0, MAX_CHARS) + '\n\n[... обрезано до ' + MAX_CHARS + ' символов]';
+      console.log(`✂️  Обрезано: ${transcript.length} символов`);
     } else {
       transcript = fullTranscript;
       console.log(`✅ Без обрезания — размер в пределах лимита`);
@@ -207,39 +207,7 @@ function formatTranscript(diff, docName) {
   return `### СТАРАЯ ВЕРСИЯ (${docName})\n\n${diff.removed.map(r => `# ${r.title}\n${r.content}`).join('\n\n')}\n\n### НОВАЯ ВЕРСИЯ (${docName})\n\n${diff.added.map(a => `# ${a.title}\n${a.content}`).join('\n\n')}\n\n${diff.changed.map(c => `# ${c.new.title}\n${c.new.content}`).join('\n\n')}`;
 }
 
-// === 6. СПРАВЕДЛИВОЕ ОБРЕЗАНИЕ ===
-function truncateFairly(oldText, newText, maxTotalChars) {
-  const total = oldText.length + newText.length;
-  if (total <= maxTotalChars) return oldText + '\n\n' + newText;
-
-  const oldRatio = oldText.length / total;
-  const newRatio = newText.length / total;
-  const minShare = 0.1;
-
-  let oldShare = Math.max(oldRatio, minShare);
-  let newShare = Math.max(newRatio, minShare);
-  const sum = oldShare + newShare;
-  oldShare /= sum;
-  newShare /= sum;
-
-  const oldLimit = Math.floor(maxTotalChars * oldShare);
-  const newLimit = maxTotalChars - oldLimit;
-
-  const truncatedOld = oldText.length > oldLimit ? truncateText(oldText, oldLimit) : oldText;
-  const truncatedNew = newText.length > newLimit ? truncateText(newText, newLimit) : newText;
-
-  return truncatedOld + '\n\n' + truncatedNew;
-}
-
-function truncateText(text, maxChars) {
-  if (text.length <= maxChars) return text;
-  let truncated = text.slice(0, maxChars);
-  const lastSpace = truncated.lastIndexOf(' ');
-  if (lastSpace > 0) truncated = truncated.slice(0, lastSpace);
-  return truncated + '\n\n[... обрезано до ' + maxChars + ' символов]';
-}
-
-// === 7. ВЫЗОВ DIFY ===
+// === 6. ВЫЗОВ DIFY ===
 async function callDify(transcript) {
   try {
     await axios.post(
@@ -267,7 +235,7 @@ async function callDify(transcript) {
   }
 }
 
-// === 8. ОЖИДАНИЕ GIST ===
+// === 7. ОЖИДАНИЕ GIST ===
 async function waitForGist() {
   console.log('⏳ Ожидание Gist...');
   for (let i = 0; i < 90; i++) {
