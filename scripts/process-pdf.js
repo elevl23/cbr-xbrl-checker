@@ -16,7 +16,7 @@ if (!DIFY_API_KEY || !GITHUB_TOKEN || !NAME || !OLD_URL || !NEW_URL) {
 }
 
 // === НАСТРОЙКИ ОГРАНИЧЕНИЙ ===
-const MAX_CHARS = 0; // Макс. символов в сумме
+const MAX_CHARS = 40000; // Макс. символов в сумме
 
 // === ОСНОВНОЙ СКРИПТ ===
 async function run() {
